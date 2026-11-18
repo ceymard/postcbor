@@ -40,13 +40,13 @@ fn cbor_concat(a: Cbor<'_>, b: Cbor<'_>) -> CborOut {
 #[pg_operator(immutable, strict, parallel_safe, name = "cbor_delete")]
 #[opname(-)]
 fn cbor_delete_text(doc: Cbor<'_>, key: &str) -> CborOut {
-    build(doc.0.len(), |o, l| edit::delete_matching(&root(doc), &[key_text(key)], o, l))
+    build(doc.0.len(), |o, l| edit::delete_matching(&root(doc), &[key_text(key).to_vec()], o, l))
 }
 
 #[pg_operator(immutable, strict, parallel_safe, name = "cbor_delete")]
 #[opname(-)]
 fn cbor_delete_texts(doc: Cbor<'_>, keys: Array<'_, &str>) -> CborOut {
-    let keys: Vec<Vec<u8>> = keys.iter().flatten().map(key_text).collect();
+    let keys: Vec<Vec<u8>> = keys.iter().flatten().map(|k| key_text(k).to_vec()).collect();
     build(doc.0.len(), |o, l| edit::delete_matching(&root(doc), &keys, o, l))
 }
 
@@ -59,7 +59,7 @@ fn cbor_delete_index(doc: Cbor<'_>, idx: i32) -> CborOut {
 #[pg_operator(immutable, strict, parallel_safe, name = "cbor_delete")]
 #[opname(-)]
 fn cbor_delete_bytes(doc: Cbor<'_>, key: &[u8]) -> CborOut {
-    build(doc.0.len(), |o, l| edit::delete_matching(&root(doc), &[key_bytes(key)], o, l))
+    build(doc.0.len(), |o, l| edit::delete_matching(&root(doc), &[key_bytes(key).to_vec()], o, l))
 }
 
 /// Typed key: removes a map key of any type, or the array elements equal to it.

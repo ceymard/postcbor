@@ -5,34 +5,65 @@ use crate::encode::head_bytes;
 use crate::error::{Error, ErrorKind, Result};
 use crate::value::{ArrayIter, Kind, MapIter, Value};
 
+/// Inline capacity of [`Key`]: covers the keys of nearly every real map without a heap allocation.
+const KEY_INLINE: usize = 40;
+
+/// Deterministic encoding of a lookup key, built per operator call: inline when short, so `doc -> 'name'`
+/// allocates nothing.
+pub struct Key {
+    inline: [u8; KEY_INLINE],
+    len: usize,
+    heap: Vec<u8>,
+}
+
+impl core::ops::Deref for Key {
+    type Target = [u8];
+    fn deref(&self) -> &[u8] {
+        if self.heap.is_empty() { &self.inline[..self.len] } else { &self.heap }
+    }
+}
+
+impl Key {
+    fn new(head: &[u8], content: &[u8]) -> Key {
+        let len = head.len() + content.len();
+        let mut k = Key { inline: [0; KEY_INLINE], len, heap: Vec::new() };
+        if len <= KEY_INLINE {
+            k.inline[..head.len()].copy_from_slice(head);
+            k.inline[head.len()..len].copy_from_slice(content);
+        } else {
+            k.heap.reserve_exact(len);
+            k.heap.extend_from_slice(head);
+            k.heap.extend_from_slice(content);
+        }
+        k
+    }
+}
+
 /// Deterministic encoding of a text key.
-pub fn key_text(s: &str) -> Vec<u8> {
+pub fn key_text(s: &str) -> Key {
     key_with(MAJOR_TEXT, s.as_bytes())
 }
 
 /// Deterministic encoding of a byte-string key.
-pub fn key_bytes(b: &[u8]) -> Vec<u8> {
+pub fn key_bytes(b: &[u8]) -> Key {
     key_with(MAJOR_BYTES, b)
 }
 
-fn key_with(major: u8, content: &[u8]) -> Vec<u8> {
+fn key_with(major: u8, content: &[u8]) -> Key {
     let mut h = [0u8; 9];
     let n = head_bytes(major, content.len() as u64, &mut h);
-    let mut v = Vec::with_capacity(n + content.len());
-    v.extend_from_slice(&h[..n]);
-    v.extend_from_slice(content);
-    v
+    Key::new(&h[..n], content)
 }
 
 /// Deterministic encoding of an integer key.
-pub fn key_int(i: i64) -> Vec<u8> {
+pub fn key_int(i: i64) -> Key {
     let mut h = [0u8; 9];
     let n = if i >= 0 {
         head_bytes(MAJOR_UNSIGNED, i as u64, &mut h)
     } else {
         head_bytes(MAJOR_NEGATIVE, (-1 - i) as u64, &mut h)
     };
-    h[..n].to_vec()
+    Key::new(&h[..n], &[])
 }
 
 /// `-> int`: array index (negative counts from the end) or integer map key.

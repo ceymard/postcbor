@@ -31,7 +31,7 @@ fuzz_target!(|input: (Vec<u8>, Vec<u8>, Op)| {
     let mut out = Vec::new();
     let r = match &input.2 {
         Op::Concat => edit::concat(&va, &vb, &mut out, &postbor_fuzz::ctx().0),
-        Op::DeleteKey(k) => edit::delete_matching(&va, &[ops::key_text(k)], &mut out, &postbor_fuzz::ctx().0),
+        Op::DeleteKey(k) => edit::delete_matching(&va, &[ops::key_text(k).to_vec()], &mut out, &postbor_fuzz::ctx().0),
         Op::DeleteIndex(i) => edit::delete_index(&va, *i, &mut out, &postbor_fuzz::ctx().0),
         Op::DeletePath(p) => edit::delete_path(&va, &steps(p), &mut out, &postbor_fuzz::ctx().0),
         Op::Set(p, create) => edit::set_path(&va, &steps(p), vb.d.body, SetMode::Set { create: *create }, &mut out, &postbor_fuzz::ctx().0),

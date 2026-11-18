@@ -175,7 +175,7 @@ pub fn delete_index(v: &Value, i: i64, out: &mut impl OutBuf, limits: &Limits) -
             Some(e) => splice(&v.d, Some(v.pos), Change { s: e.pos, e: e.end()?, new: &[], delta: -1 }, out, md),
             None => copy_value(v, out),
         },
-        Kind::Map(_) => delete_matching(v, &[key_int(i)], out, limits),
+        Kind::Map(_) => delete_matching(v, &[key_int(i).to_vec()], out, limits),
         _ => Err(invalid("cannot delete from scalar")),
     }
 }
@@ -200,10 +200,10 @@ enum Target {
 /// How `step` addresses `container`. None when it cannot address it (scalar, or non-integer on an array).
 fn target(container: &Value, step: Step, strict: bool, pos: usize) -> Result<Option<Target>> {
     Ok(match (container.kind()?, step) {
-        (Kind::Map(_), Step::Text(s)) => Some(Target::Key(key_text(s))),
+        (Kind::Map(_), Step::Text(s)) => Some(Target::Key(key_text(s).to_vec())),
         (Kind::Map(_), Step::Typed(k)) => Some(Target::Key(k.bytes()?.to_vec())),
-        (Kind::Map(_), Step::Int(i)) => Some(Target::Key(key_int(i))),
-        (Kind::Map(_), Step::Bytes(b)) => Some(Target::Key(crate::ops::key_bytes(b))),
+        (Kind::Map(_), Step::Int(i)) => Some(Target::Key(key_int(i).to_vec())),
+        (Kind::Map(_), Step::Bytes(b)) => Some(Target::Key(crate::ops::key_bytes(b).to_vec())),
         (Kind::Array(_), Step::Int(i)) => Some(Target::Index(i)),
         (Kind::Array(_), Step::Bytes(_)) if strict => return Err(invalid("path element is not an integer")),
         (Kind::Array(_), Step::Text(s)) => match parse_index(s) {
@@ -380,10 +380,10 @@ fn step_index(step: Step) -> Result<i64> {
 /// The key bytes of a map-creating step.
 fn step_key(step: Step) -> Result<Vec<u8>> {
     Ok(match step {
-        Step::Text(s) => key_text(s),
-        Step::Bytes(b) => crate::ops::key_bytes(b),
+        Step::Text(s) => key_text(s).to_vec(),
+        Step::Bytes(b) => crate::ops::key_bytes(b).to_vec(),
         Step::Typed(k) => k.bytes()?.to_vec(),
-        Step::Int(i) => key_int(i),
+        Step::Int(i) => key_int(i).to_vec(),
     })
 }
 
@@ -620,8 +620,8 @@ mod tests {
 
     #[test]
     fn deletion() {
-        assert_eq!(run(r#"{"a": 1, "b": 2}"#, |v, o| delete_matching(v, &[key_text("a")], o, &Limits::default())), r#"{"b": 2}"#);
-        assert_eq!(run(r#"["a", "b", "a", 1]"#, |v, o| delete_matching(v, &[key_text("a")], o, &Limits::default())), r#"["b", 1]"#);
+        assert_eq!(run(r#"{"a": 1, "b": 2}"#, |v, o| delete_matching(v, &[key_text("a").to_vec()], o, &Limits::default())), r#"{"b": 2}"#);
+        assert_eq!(run(r#"["a", "b", "a", 1]"#, |v, o| delete_matching(v, &[key_text("a").to_vec()], o, &Limits::default())), r#"["b", 1]"#);
         assert_eq!(run("[1, 2, 3]", |v, o| delete_index(v, -1, o, &Limits::default())), "[1, 2]");
         assert_eq!(run("[1, 2, 3]", |v, o| delete_index(v, 5, o, &Limits::default())), "[1, 2, 3]");
         assert_eq!(run(r#"{1: "x", 2: "y"}"#, |v, o| delete_index(v, 1, o, &Limits::default())), r#"{2: "y"}"#);
