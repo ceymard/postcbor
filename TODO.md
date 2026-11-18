@@ -56,7 +56,7 @@ Notes from implementation:
   - 200k small documents: cbor 15 MB vs jsonb 27 MB; `->>` and `@>` about 20% slower than jsonb; text output 2× faster; `DISTINCT` 3.3× faster.
   - 2k documents of 1000 keys: one-key lookup 1.6× faster than jsonb, but cbor is larger (31 MB vs 19 MB): the index section (4 bytes per entry) adds ~37% to the body and keeps values below pglz's 25% gain, so they are stored uncompressed while jsonb compresses.
 - [x] Shrink the index section: one offset every 8 entries, 2-byte offsets when they fit. 1000-key documents: 16 MB vs jsonb 19 MB (was 31 MB), values now compress; one-key lookup still faster than jsonb. `INDEX_THRESHOLD` stays 16 (a 10-entry map gains nothing measurable from an index).
-- [ ] Find why `->>`/`@>` on small documents trail jsonb by ~20% (per-call overhead in the glue is the first suspect).
+- [ ] Small documents still trail jsonb (200k rows, release build, best of 5): `->>` 26.7 ms vs 20.9, `@>` 39.2 vs 28.8, `?` 32.2 vs 17.4. Done so far: lookup keys encoded on the stack (no measurable gain), scalar fast path in `end_of` (core lookup 47 → 31 ns). Trivial functions (`cbor_typeof`) match jsonb, so the rest is in the core scan (~30 ns on a 4-key map) and per-call glue work for text arguments; next step needs a profiler (`perf` is not installed).
 
 ## Promised in the design, not done yet
 

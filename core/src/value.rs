@@ -187,7 +187,23 @@ impl<'a> Value<'a> {
 }
 
 /// Body offset just past the item at `pos`.
+#[inline]
 pub fn end_of(d: &Datum, pos: usize) -> Result<usize> {
+    // Fast path: scalars and strings end where their head says; containers and tags need the walk.
+    let mut c = Cursor::at(d.body, pos);
+    let h = c.head().map_err(|e| corrupt(e.offset))?;
+    match h.major {
+        MAJOR_BYTES | MAJOR_TEXT => {
+            c.take(h.arg).map_err(|e| corrupt(e.offset))?;
+            Ok(c.pos())
+        }
+        MAJOR_ARRAY | MAJOR_MAP | MAJOR_TAG => end_of_nested(d, pos),
+        _ => Ok(c.pos()),
+    }
+}
+
+/// [`end_of`] for containers and tags.
+fn end_of_nested(d: &Datum, pos: usize) -> Result<usize> {
     let mut c = Cursor::at(d.body, pos);
     let mut pending: u64 = 1;
     while pending > 0 {
