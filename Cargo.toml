@@ -1,0 +1,21 @@
+[workspace]
+resolver = "3"
+members = ["core", "postbor"]
+exclude = ["fuzz"]
+
+[workspace.package]
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[profile.dev]
+panic = "unwind"
+
+[profile.dev.build-override]
+opt-level = 3
+
+[profile.release]
+panic = "unwind"
+overflow-checks = true
+opt-level = 3
+lto = "fat"
+codegen-units = 1

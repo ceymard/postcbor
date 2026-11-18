@@ -1,0 +1,8 @@
+/target
+**/*.rs.bk
+postbor/tests/pg_regress/results
+postbor/tests/pg_regress/regression.diffs
+postbor/tests/pg_regress/regression.out
+fuzz/target
+fuzz/artifacts
+docs/site

@@ -1,0 +1,48 @@
+[package]
+name = "postbor-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = { version = "1", features = ["derive"] }
+postbor-core = { path = "../core" }
+
+[workspace]
+members = ["."]
+
+[profile.release]
+debug = 1
+overflow-checks = true
+
+[[bin]]
+name = "normalize"
+path = "fuzz_targets/normalize.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "edn"
+path = "fuzz_targets/edn.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "order"
+path = "fuzz_targets/order.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "edit"
+path = "fuzz_targets/edit.rs"
+test = false
+doc = false
+bench = false

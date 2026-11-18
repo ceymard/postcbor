@@ -1,0 +1,53 @@
+# Build and install: `make && make install` (PG_CONFIG selects the PostgreSQL installation).
+PG_CONFIG ?= pg_config
+CARGO ?= cargo
+PG_MAJOR := $(shell $(PG_CONFIG) --version | sed -E 's/^PostgreSQL ([0-9]+).*/\1/')
+FEATURES := --no-default-features --features pg$(PG_MAJOR)
+# Majors for the test matrix; they must be registered with `cargo pgrx init`.
+PG_VERSIONS ?= 15 16 17 18
+FUZZ_SECONDS ?= 60
+# Extra flags for `cargo pgrx install`, e.g. --sudo to install into root-owned system directories.
+PGRX_INSTALL_FLAGS ?=
+
+.PHONY: all install test test-core test-matrix miri fuzz clippy crosscheck
+
+# pgrx needs the PostgreSQL installation registered once. Building and installing use a project-local pgrx home,
+# so a developer's ~/.pgrx (used by the test targets) is never modified.
+BUILD_PGRX_HOME := $(CURDIR)/target/pgrx-home
+all install: export PGRX_HOME := $(BUILD_PGRX_HOME)
+PGRX_REGISTER = grep -qs '^pg$(PG_MAJOR) *= *"$(shell $(PG_CONFIG) --bindir)/pg_config"' $(BUILD_PGRX_HOME)/config.toml \
+	|| (mkdir -p $(BUILD_PGRX_HOME) && $(CARGO) pgrx init --pg$(PG_MAJOR) $(PG_CONFIG))
+
+all:
+	$(PGRX_REGISTER)
+	cd postbor && $(CARGO) pgrx package --pg-config $(PG_CONFIG) $(FEATURES)
+
+install:
+	$(PGRX_REGISTER)
+	cd postbor && $(CARGO) pgrx install --release --pg-config $(PG_CONFIG) $(FEATURES) $(PGRX_INSTALL_FLAGS)
+
+test-core:
+	$(CARGO) test -p postbor-core
+
+# SQL tests against pgrx's PostgreSQL of the same major as PG_CONFIG.
+test: test-core
+	cd postbor && $(CARGO) pgrx regress pg$(PG_MAJOR) --resetdb $(FEATURES)
+
+test-matrix: test-core
+	set -e; for v in $(PG_VERSIONS); do \
+		(cd postbor && $(CARGO) pgrx regress pg$$v --resetdb --no-default-features --features pg$$v); \
+	done
+
+miri:
+	$(CARGO) +nightly miri test -p postbor-core
+
+fuzz:
+	set -e; cd fuzz && for t in $$($(CARGO) +nightly fuzz list); do \
+		$(CARGO) +nightly fuzz run $$t -- -max_total_time=$(FUZZ_SECONDS); \
+	done
+
+crosscheck:
+	uv run -q --with cbor2 tests/crosscheck.py 10000
+
+clippy:
+	$(CARGO) clippy --all-targets -- -D warnings

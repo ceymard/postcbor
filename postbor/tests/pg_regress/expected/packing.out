@@ -1,0 +1,56 @@
+-- Packed input is unpacked on every input path; stored values never contain packing.
+SELECT '113([["foobar", h''666f6f62'', "fo"], [128("t"), 129("art"), 130("obart")]])'::cbor;
+               cbor                
+-----------------------------------
+ ["foobart", "foobart", "foobart"]
+(1 row)
+
+SELECT '113([[114(["key1", "key2", "key0"])], [128(["value 1", 2, false]), 128(["", 0])]])'::cbor;
+                                   cbor                                   
+--------------------------------------------------------------------------
+ [{"key0": false, "key1": "value 1", "key2": 2}, {"key1": "", "key2": 0}]
+(1 row)
+
+SELECT '[57343([57344, ["name", "age"], "ann", 7]), 57344(["bob", 9])]'::cbor;
+                          cbor                          
+--------------------------------------------------------
+ [{"age": 7, "name": "ann"}, {"age": 9, "name": "bob"}]
+(1 row)
+
+SELECT '\xd83384816361626380808281e0e0'::bytea::cbor AS cbor_x_tag51;
+   cbor_x_tag51   
+------------------
+ [["abc"], "abc"]
+(1 row)
+
+-- Outside a table setup tag, references are plain values.
+SELECT '[simple(0), 6(1), 128("x")]'::cbor;
+            cbor             
+-----------------------------
+ [simple(0), 6(1), 128("x")]
+(1 row)
+
+-- Errors: undefined record, reference loop, table too small.
+SELECT '57344([1])'::cbor;
+ERROR:  invalid input syntax for type cbor: cbor-x record reference without a definition in the value at character 8
+SELECT '113([[simple(0)], simple(0)])'::cbor;
+ERROR:  cbor value rejected: value expands beyond the configured limits at character 8
+SELECT '113([["a"], simple(5)])'::cbor;
+ERROR:  invalid input syntax for type cbor: packed reference outside the shared item table at character 8
+-- cbor_pack output reads back to the same value.
+WITH v(c) AS (SELECT cbor_agg(cbor_build_object('name', 'user ' || i, 'status', 'active', 'role', 'administrator')) FROM generate_series(1, 30) i)
+SELECT cbor_pack(c, 'cbor-x')::cbor = c AS cbor_x_round_trip, cbor_pack(c, 'ietf')::cbor = c AS ietf_round_trip,
+       length(cbor_pack(c, 'cbor-x')) < cbor_byte_length(c) AS cbor_x_smaller, length(cbor_pack(c, 'ietf')) < cbor_byte_length(c) AS ietf_smaller FROM v;
+ cbor_x_round_trip | ietf_round_trip | cbor_x_smaller | ietf_smaller 
+-------------------+-----------------+----------------+--------------
+ t                 | t               | t              | t
+(1 row)
+
+SELECT cbor_pack('[{"a": 1}, {"a": 2}]', 'cbor-x'), cbor_pack('["abcd", "abcd"]', 'ietf');
+              cbor_pack               |         cbor_pack          
+--------------------------------------+----------------------------
+ \x82d9dfff8319e00081616101d9e0008102 | \xd8718281646162636482e0e0
+(1 row)
+
+SELECT cbor_pack('1', 'zip');
+ERROR:  format must be 'cbor-x' or 'ietf'

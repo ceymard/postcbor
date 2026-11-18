@@ -1,0 +1,193 @@
+//! Access, containment and existence operators, and the typed-key functions (design §8).
+
+use pgrx::prelude::*;
+use postbor_core::OutBuf;
+use postbor_core::datum::write_subvalue;
+use postbor_core::ops;
+use postbor_core::value::{Kind, Value};
+
+use crate::datum::{Cbor, CborOut, PallocBuf, TextOut, VarlenaOut};
+use crate::error::{OrRaise, Source};
+use crate::io::{parse_datum, print_value};
+
+/// A sub-value as a datum of its own.
+pub fn value_out(v: &Value) -> CborOut {
+    let end = v.end().or_raise(Source::Stored);
+    let mut out = PallocBuf::varlena(end - v.pos + 1);
+    write_subvalue(&v.d, v.pos, end, &mut out).or_raise(Source::Stored);
+    CborOut(out.into_varlena())
+}
+
+/// `->>` rendering: text strings as themselves, null as SQL NULL, anything else as EDN.
+pub fn value_text(v: &Value) -> Option<TextOut> {
+    let mut out = PallocBuf::varlena(16);
+    match v.kind().or_raise(Source::Stored) {
+        Kind::Null => return None,
+        Kind::Text(s) => write_text(&mut out, s),
+        _ => print_value(v, &mut out, false),
+    }
+    Some(TextOut(VarlenaOut(out.into_varlena())))
+}
+
+/// Appends text (databases are UTF-8, ADR-0010).
+pub fn write_text(out: &mut PallocBuf, s: &str) {
+    out.write_bytes(s.as_bytes()).or_raise(Source::Stored);
+}
+
+fn root(c: Cbor<'_>) -> Value<'_> {
+    Value::root(parse_datum(c))
+}
+
+/// Text path steps as owned strings.
+pub fn text_steps<'x>(path: impl Iterator<Item = Option<&'x str>>) -> Vec<Option<String>> {
+    path.map(|s| s.map(str::to_string)).collect()
+}
+
+fn get_text_path<'a>(v: &Value<'a>, steps: &[Option<String>]) -> Option<Value<'a>> {
+    let refs: Vec<Option<&str>> = steps.iter().map(|s| s.as_deref()).collect();
+    ops::get_text_path(v, &refs).or_raise(Source::Stored)
+}
+
+#[pg_operator(immutable, strict, parallel_safe)]
+#[opname(->)]
+fn cbor_array_element(doc: Cbor<'_>, idx: i32) -> Option<CborOut> {
+    ops::get_int(&root(doc), i64::from(idx)).or_raise(Source::Stored).map(|v| value_out(&v))
+}
+
+#[pg_operator(immutable, strict, parallel_safe)]
+#[opname(->>)]
+fn cbor_array_element_text(doc: Cbor<'_>, idx: i32) -> Option<TextOut> {
+    ops::get_int(&root(doc), i64::from(idx)).or_raise(Source::Stored).and_then(|v| value_text(&v))
+}
+
+#[pg_operator(immutable, strict, parallel_safe)]
+#[opname(->)]
+fn cbor_object_field(doc: Cbor<'_>, key: &str) -> Option<CborOut> {
+    root(doc).map_get(&ops::key_text(key)).or_raise(Source::Stored).map(|v| value_out(&v))
+}
+
+#[pg_operator(immutable, strict, parallel_safe)]
+#[opname(->>)]
+fn cbor_object_field_text(doc: Cbor<'_>, key: &str) -> Option<TextOut> {
+    root(doc).map_get(&ops::key_text(key)).or_raise(Source::Stored).and_then(|v| value_text(&v))
+}
+
+#[pg_operator(immutable, strict, parallel_safe)]
+#[opname(->)]
+fn cbor_object_field_bytes(doc: Cbor<'_>, key: &[u8]) -> Option<CborOut> {
+    root(doc).map_get(&ops::key_bytes(key)).or_raise(Source::Stored).map(|v| value_out(&v))
+}
+
+#[pg_operator(immutable, strict, parallel_safe)]
+#[opname(->>)]
+fn cbor_object_field_bytes_text(doc: Cbor<'_>, key: &[u8]) -> Option<TextOut> {
+    root(doc).map_get(&ops::key_bytes(key)).or_raise(Source::Stored).and_then(|v| value_text(&v))
+}
+
+#[pg_operator(immutable, strict, parallel_safe)]
+#[opname(#>)]
+fn cbor_extract_path_op(doc: Cbor<'_>, path: Array<'_, &str>) -> Option<CborOut> {
+    get_text_path(&root(doc), &text_steps(path.iter())).map(|v| value_out(&v))
+}
+
+#[pg_operator(immutable, strict, parallel_safe)]
+#[opname(#>>)]
+fn cbor_extract_path_text_op(doc: Cbor<'_>, path: Array<'_, &str>) -> Option<TextOut> {
+    get_text_path(&root(doc), &text_steps(path.iter())).and_then(|v| value_text(&v))
+}
+
+#[pg_extern(immutable, strict, parallel_safe)]
+fn cbor_extract_path(doc: Cbor<'_>, path: VariadicArray<'_, &str>) -> Option<CborOut> {
+    get_text_path(&root(doc), &text_steps(path.iter())).map(|v| value_out(&v))
+}
+
+#[pg_extern(immutable, strict, parallel_safe)]
+fn cbor_extract_path_text(doc: Cbor<'_>, path: VariadicArray<'_, &str>) -> Option<TextOut> {
+    get_text_path(&root(doc), &text_steps(path.iter())).and_then(|v| value_text(&v))
+}
+
+#[pg_extern(immutable, strict, parallel_safe)]
+fn cbor_get(doc: Cbor<'_>, key: Cbor<'_>) -> Option<CborOut> {
+    ops::get_key(&root(doc), &root(key)).or_raise(Source::Stored).map(|v| value_out(&v))
+}
+
+#[pg_extern(immutable, strict, parallel_safe)]
+fn cbor_get_text(doc: Cbor<'_>, key: Cbor<'_>) -> Option<TextOut> {
+    ops::get_key(&root(doc), &root(key)).or_raise(Source::Stored).and_then(|v| value_text(&v))
+}
+
+#[pg_extern(immutable, strict, parallel_safe)]
+fn cbor_get_path(doc: Cbor<'_>, path: Cbor<'_>) -> Option<CborOut> {
+    ops::get_typed_path(&root(doc), &root(path)).or_raise(Source::Stored).map(|v| value_out(&v))
+}
+
+#[pg_extern(immutable, strict, parallel_safe)]
+fn cbor_get_path_text(doc: Cbor<'_>, path: Cbor<'_>) -> Option<TextOut> {
+    ops::get_typed_path(&root(doc), &root(path)).or_raise(Source::Stored).and_then(|v| value_text(&v))
+}
+
+#[pg_operator(immutable, strict, parallel_safe)]
+#[opname(@>)]
+#[commutator(<@)]
+#[restrict(matchingsel)]
+#[join(matchingjoinsel)]
+fn cbor_contains(a: Cbor<'_>, b: Cbor<'_>) -> bool {
+    ops::contains(&root(a), &root(b), &mut crate::settings::PgCtx::new()).or_raise(Source::Stored)
+}
+
+#[pg_operator(immutable, strict, parallel_safe)]
+#[opname(<@)]
+#[commutator(@>)]
+#[restrict(matchingsel)]
+#[join(matchingjoinsel)]
+fn cbor_contained(a: Cbor<'_>, b: Cbor<'_>) -> bool {
+    ops::contains(&root(b), &root(a), &mut crate::settings::PgCtx::new()).or_raise(Source::Stored)
+}
+
+#[pg_operator(immutable, strict, parallel_safe)]
+#[opname(?)]
+#[restrict(matchingsel)]
+#[join(matchingjoinsel)]
+fn cbor_exists(doc: Cbor<'_>, key: &str) -> bool {
+    ops::exists_text(&root(doc), key).or_raise(Source::Stored)
+}
+
+#[pg_operator(immutable, strict, parallel_safe)]
+#[opname(?|)]
+#[restrict(matchingsel)]
+#[join(matchingjoinsel)]
+fn cbor_exists_any(doc: Cbor<'_>, keys: Array<'_, &str>) -> bool {
+    let v = root(doc);
+    keys.iter().flatten().any(|k| ops::exists_text(&v, k).or_raise(Source::Stored))
+}
+
+#[pg_operator(immutable, strict, parallel_safe)]
+#[opname(?&)]
+#[restrict(matchingsel)]
+#[join(matchingjoinsel)]
+fn cbor_exists_all(doc: Cbor<'_>, keys: Array<'_, &str>) -> bool {
+    let v = root(doc);
+    keys.iter().flatten().all(|k| ops::exists_text(&v, k).or_raise(Source::Stored))
+}
+
+#[pg_extern(immutable, strict, parallel_safe)]
+fn cbor_has(doc: Cbor<'_>, key: Cbor<'_>) -> bool {
+    let k = root(key);
+    ops::exists_encoded(&root(doc), k.bytes().or_raise(Source::Stored)).or_raise(Source::Stored)
+}
+
+fn keys_of<'a>(keys: &Value<'a>) -> Vec<Value<'a>> {
+    keys.array_iter().or_raise(Source::Stored).map(|k| k.or_raise(Source::Stored)).collect()
+}
+
+#[pg_extern(immutable, strict, parallel_safe)]
+fn cbor_has_any(doc: Cbor<'_>, keys: Cbor<'_>) -> bool {
+    let v = root(doc);
+    keys_of(&root(keys)).iter().any(|k| ops::exists_encoded(&v, k.bytes().or_raise(Source::Stored)).or_raise(Source::Stored))
+}
+
+#[pg_extern(immutable, strict, parallel_safe)]
+fn cbor_has_all(doc: Cbor<'_>, keys: Cbor<'_>) -> bool {
+    let v = root(doc);
+    keys_of(&root(keys)).iter().all(|k| ops::exists_encoded(&v, k.bytes().or_raise(Source::Stored)).or_raise(Source::Stored))
+}
