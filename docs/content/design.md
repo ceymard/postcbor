@@ -159,7 +159,7 @@ Packing schemes recognized:
 - **cbor-x records** (cbor-records spec; the tags the current cbor-x encoder emits):
   - 57342: record definitions
   - 57343: inline record
-  - 57344–57599: record references, unpacked to maps with text keys
+  - 57344–65535 (`0xe000 + id`): record references, unpacked to maps with text keys. cbor-x reads every tag from `0xe000` as a reference (8192 ids), wider than the cbor-records spec's 57344–57599.
 
   A reference to a structure not defined earlier in the same value is an error. This covers cbor-x shared and sequential structures, which are kept outside the data. cbor-x's legacy inline-record tag 105 is not supported: it clashes with IETF ijoin.
 - **cbor-x's own packing** (`pack` option): an older packed-CBOR draft, using tag 51 for the table, with tag 6 and simple-value references inside its scope.
@@ -168,12 +168,12 @@ Packing schemes recognized:
 Limits: expansion is bounded by `postbor.max_expansion_ratio` and `postbor.max_expanded_size`, nesting by `postbor.max_depth`. A reference cycle is an error.
 
 Implementation (`core/src/pack.rs`):
-- Normalization stops with an internal signal when it meets a table-setup or record tag (113, 1113, 51, 57342–57599); only then is the input decoded into an arena and resolved. Unpacked input pays nothing.
+- Normalization stops with an internal signal when it meets a table-setup or record tag (113, 1113, 51, 57342–65535); only then is the input decoded into an arena and resolved. Unpacked input pays nothing.
 - Resolution uses an explicit task stack and per-tag scopes: new table entries use the new number space, inherited ones keep theirs (draft §3).
 - Argument references combine argument and rump per draft §2.3–2.4: arrays concatenate, maps merge (right wins, `undefined` removes), strings concatenate taking the rump's string type, string with array joins. Function tags 105 (ijoin), 106 (join) and 114 (record) apply when the left-hand side is such a tag.
 - cbor-x tag 51 is `[values, prefixes, suffixes, rump]`; only the value table is used (cbor-x's encoder writes empty prefix and suffix tables).
 - Reference chains longer than 64 are rejected (loops); every arena node is charged against a memory budget of four times the output limit.
-- Output packing is deterministic: `ietf` puts strings of 3+ bytes used at least twice into a tag 113 table (largest saving first, ties by bytes), except when the value holds plain simple values 0–15 or tags 6/128–143, which would read as references inside tag 113 (found by fuzzing): such values are returned unpacked; `cbor-x` turns maps whose text-key set repeats into an inline record definition (57343) at first use and record references (57344+) afterwards, up to 256 structures.
+- Output packing is deterministic: `ietf` puts strings of 3+ bytes used at least twice into a tag 113 table (largest saving first, ties by bytes), except when the value holds plain simple values 0–15 or tags 6/128–143, which would read as references inside tag 113 (found by fuzzing): such values are returned unpacked; `cbor-x` turns maps whose text-key set repeats into an inline record definition (57343) at first use and record references (57344+) afterwards, up to 8191 structures (ids up to `0xfffe`; cbor-x confuses id 8191 with its inline-definition tag).
 - A value packed more than `postbor.max_expansion_ratio` times smaller than its unpacked form is rejected on input; raise the setting for such data.
 
 Output: `cbor_pack(c cbor, format text DEFAULT 'cbor-x') → bytea`.

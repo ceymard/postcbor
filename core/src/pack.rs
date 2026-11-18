@@ -1,5 +1,5 @@
 //! Packed input (design §6): IETF Packed CBOR (draft-19: tags 113/1113, shared and argument references,
-//! join/ijoin/record functions), cbor-x packing (tag 51) and cbor-x records (tags 57342–57599).
+//! join/ijoin/record functions), cbor-x packing (tag 51) and cbor-x records (tags 57342–65535).
 //! Unpacking decodes into an arena, resolves references with an explicit task stack, and serializes plain CBOR.
 
 use crate::ctx::{Ctx, INTERRUPT_EVERY};
@@ -16,7 +16,11 @@ pub fn is_packing_tag(tag: u64) -> bool {
 const RECORD_DEFS: u64 = 57342;
 const RECORD_INLINE: u64 = 57343;
 const RECORD_FIRST: u64 = 57344;
-const RECORD_LAST: u64 = 57599;
+/// cbor-x reads any tag from 0xe000 as a record reference (id = tag & 0x1fff), so 8192 ids, not the 256 of the
+/// cbor-records spec.
+const RECORD_LAST: u64 = 0xffff;
+/// Highest id written: cbor-x resolves 0xffff's id (8191) against the inline-definition tag 0xdfff, so it is avoided.
+const RECORD_LAST_WRITTEN: u64 = 0xfffe;
 const UNDEFINED: u8 = 0xf7;
 /// Longest chain of references followed while resolving one item; stops reference loops.
 const MAX_CHASE: u32 = 64;
@@ -817,7 +821,7 @@ pub fn pack(v: &Value, fmt: PackFormat, out: &mut impl OutBuf) -> Result<()> {
                         write_head(out, MAJOR_ARRAY, h.arg)?;
                         try_push(&mut stack, PFrame::Record(h.arg))?;
                     }
-                    Some(k) if records.len() < (RECORD_LAST - RECORD_FIRST + 1) as usize => {
+                    Some(k) if records.len() < (RECORD_LAST_WRITTEN - RECORD_FIRST + 1) as usize => {
                         let id = RECORD_FIRST + records.len() as u64;
                         write_head(out, MAJOR_TAG, RECORD_INLINE)?;
                         write_head(out, MAJOR_ARRAY, h.arg + 2)?;
@@ -899,6 +903,8 @@ mod tests {
         );
         assert_eq!(up(r#"57342([57344, ["x", "y"], [57344([1, 2]), 57344([3, 4])]])"#).unwrap(), r#"[{"x": 1, "y": 2}, {"x": 3, "y": 4}]"#);
         assert!(up("57344([1])").is_err());
+        // Ids beyond the 256 of the cbor-records spec, as cbor-x (and rel) write them.
+        assert_eq!(up(r#"[57343([65000, ["a"], 1]), 65000([2])]"#).unwrap(), r#"[{"a": 1}, {"a": 2}]"#);
     }
 
     fn roundtrip(text: &str, fmt: PackFormat) -> Vec<u8> {
