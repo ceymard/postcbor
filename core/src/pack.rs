@@ -760,7 +760,11 @@ pub fn pack(v: &Value, fmt: PackFormat, out: &mut impl OutBuf) -> Result<()> {
         PackFormat::Ietf => repeated_strings(v)?.into_iter().enumerate().map(|(i, s)| (s, i)).collect(),
         PackFormat::CborX => Default::default(),
     };
+    // cbor-x: text-key set → record id, and the key set held by each id slot (ids are reused round-robin when full).
     let mut records: std::collections::BTreeMap<Vec<u8>, u64> = std::collections::BTreeMap::new();
+    let mut slots: Vec<Vec<u8>> = Vec::new();
+    let mut next_reuse = 0usize;
+    let capacity = (RECORD_LAST_WRITTEN - RECORD_FIRST + 1) as usize;
     if fmt == PackFormat::Ietf && !table.is_empty() {
         let mut ordered: Vec<(&Vec<u8>, &usize)> = table.iter().collect();
         ordered.sort_by_key(|&(_, i)| *i);
@@ -814,15 +818,28 @@ pub fn pack(v: &Value, fmt: PackFormat, out: &mut impl OutBuf) -> Result<()> {
                 try_push(&mut stack, PFrame::Copy(h.arg))?;
             }
             MAJOR_MAP => {
-                let keys = if fmt == PackFormat::CborX && h.arg > 0 { record_keys(&item)? } else { None };
+                // Every text-keyed map, empty ones included, becomes a record: a cbor-x decoder with records on
+                // reads a plain map as a JS Map, not an object.
+                let keys = if fmt == PackFormat::CborX { record_keys(&item)? } else { None };
                 match keys {
                     Some(k) if records.contains_key(&k) => {
                         write_head(out, MAJOR_TAG, records[&k])?;
                         write_head(out, MAJOR_ARRAY, h.arg)?;
                         try_push(&mut stack, PFrame::Record(h.arg))?;
                     }
-                    Some(k) if records.len() < (RECORD_LAST_WRITTEN - RECORD_FIRST + 1) as usize => {
-                        let id = RECORD_FIRST + records.len() as u64;
+                    Some(k) => {
+                        // A new shape: a free id, or (as cbor-x does when full) the oldest one, redefined.
+                        let slot = if slots.len() < capacity {
+                            slots.push(k.clone());
+                            slots.len() - 1
+                        } else {
+                            let slot = next_reuse % capacity;
+                            next_reuse += 1;
+                            records.remove(&slots[slot]);
+                            slots[slot] = k.clone();
+                            slot
+                        };
+                        let id = RECORD_FIRST + slot as u64;
                         write_head(out, MAJOR_TAG, RECORD_INLINE)?;
                         write_head(out, MAJOR_ARRAY, h.arg + 2)?;
                         write_head(out, MAJOR_UNSIGNED, id)?;
@@ -831,7 +848,7 @@ pub fn pack(v: &Value, fmt: PackFormat, out: &mut impl OutBuf) -> Result<()> {
                         records.insert(k, id);
                         try_push(&mut stack, PFrame::Record(h.arg))?;
                     }
-                    _ => {
+                    None => {
                         write_head(out, MAJOR_MAP, h.arg)?;
                         try_push(&mut stack, PFrame::Copy(h.arg * 2))?;
                     }
@@ -903,6 +920,8 @@ mod tests {
         );
         assert_eq!(up(r#"57342([57344, ["x", "y"], [57344([1, 2]), 57344([3, 4])]])"#).unwrap(), r#"[{"x": 1, "y": 2}, {"x": 3, "y": 4}]"#);
         assert!(up("57344([1])").is_err());
+        // A redefined id replaces the earlier structure from there on.
+        assert_eq!(up(r#"[57343([57344, ["a"], 1]), 57343([57344, ["b"], 2]), 57344([3])]"#).unwrap(), r#"[{"a": 1}, {"b": 2}, {"b": 3}]"#);
         // Ids beyond the 256 of the cbor-records spec, as cbor-x (and rel) write them.
         assert_eq!(up(r#"[57343([65000, ["a"], 1]), 65000([2])]"#).unwrap(), r#"[{"a": 1}, {"a": 2}]"#);
     }

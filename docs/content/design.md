@@ -163,7 +163,7 @@ Packing schemes recognized:
 
   A reference to a structure not defined earlier in the same value is an error. This covers cbor-x shared and sequential structures, which are kept outside the data. cbor-x's legacy inline-record tag 105 is not supported: it clashes with IETF ijoin.
 - **cbor-x's own packing** (`pack` option): an older packed-CBOR draft, using tag 51 for the table, with tag 6 and simple-value references inside its scope.
-- **cbor-x bundled strings** (tag 57337): not supported, so it is kept as a plain tag.
+- **cbor-x bundled strings** (`bundleStrings`): not supported. cbor-x writes the strings after the value, so the input is not a single item and is refused.
 
 Limits: expansion is bounded by `postbor.max_expansion_ratio` and `postbor.max_expanded_size`, nesting by `postbor.max_depth`. A reference cycle is an error.
 

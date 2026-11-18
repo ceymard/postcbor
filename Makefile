@@ -9,7 +9,7 @@ FUZZ_SECONDS ?= 60
 # Extra flags for `cargo pgrx install`, e.g. --sudo to install into root-owned system directories.
 PGRX_INSTALL_FLAGS ?=
 
-.PHONY: all install test test-core test-matrix miri fuzz clippy crosscheck
+.PHONY: all install test test-core test-matrix miri fuzz clippy crosscheck cborx-check
 
 # pgrx needs the PostgreSQL installation registered once. Building and installing use a project-local pgrx home,
 # so a developer's ~/.pgrx (used by the test targets) is never modified.
@@ -48,6 +48,10 @@ fuzz:
 
 crosscheck:
 	uv run -q --with cbor2 tests/crosscheck.py 10000
+
+# Against real cbor-x: CBORX_NODE_MODULES must contain a cbor-x install (nothing is added to this repository).
+cborx-check:
+	NODE_PATH=$(CBORX_NODE_MODULES) node tests/cborx/check.mjs
 
 clippy:
 	$(CARGO) clippy --all-targets -- -D warnings

@@ -63,7 +63,7 @@ Notes from implementation:
 - [x] Debug builds re-validating every stored datum they read (design §2): `io::parse_datum` re-normalizes and compares; every pg_regress run uses it.
 - [ ] `walk` in the core (typed path/value pairs; needed by phase 2).
 - [x] Combine/serialize functions for the aggregates (parallel aggregation), tested with a forced parallel plan.
-- [ ] cbor-x compatibility checked against real cbor-x output (current fixtures were written from reading cbor-x's source; needs Node.js and cbor-x, ask the user first).
+- [x] cbor-x compatibility checked against real cbor-x 1.6.7, both directions (`make cborx-check CBORX_NODE_MODULES=…`). Found and fixed: record ids beyond 256, empty maps and more than 8191 shapes in `cbor_pack`.
 - [x] Interrupt checks in long operations: normalization, unpacking and containment through `Ctx`; comparison, EDN/JSON printing and strip_nulls through the core's interrupt hook (`ctx::Ticker`).
 
 ## Phase 2: GIN

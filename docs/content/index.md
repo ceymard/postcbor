@@ -39,7 +39,7 @@ Values are stored in one canonical form: map keys sorted, shortest integers and 
 
 ## Binary form
 
-`bytea::cbor` decodes CBOR bytes; `cbor::bytea` and the binary protocol give the canonical encoding. Packed CBOR (IETF Packed CBOR, cbor-x records and cbor-x packing) is unpacked on input; `cbor_pack(value, 'cbor-x' | 'ietf')` produces a packed `bytea`. cbor-x support follows cbor-x's source and the cbor-records specification but has not yet been tested against real cbor-x output; cbor-x shared or sequential structures (definitions kept outside the value) are rejected.
+`bytea::cbor` decodes CBOR bytes; `cbor::bytea` and the binary protocol give the canonical encoding. Packed CBOR (IETF Packed CBOR, cbor-x records and cbor-x packing) is unpacked on input; `cbor_pack(value, 'cbor-x' | 'ietf')` produces a packed `bytea`. Tested against cbor-x 1.6.7 (`make cborx-check`): records (cbor-x's default) and `pack` read back as the plain value, and `cbor_pack(…, 'cbor-x')` decodes in cbor-x to the original objects. cbor-x shared or sequential structures (definitions kept outside the value) and `bundleStrings` are refused.
 
 ## Operators
 
