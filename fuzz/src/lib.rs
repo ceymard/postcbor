@@ -22,10 +22,6 @@ pub fn store(input: &[u8]) -> Option<Vec<u8>> {
 /// index lookups agreeing with plain iteration, and JSON conversion not failing in lossy mode.
 pub fn check_stored(stored: &[u8]) {
     let d = Datum::parse(stored).expect("stored datum parses");
-    // Edit results deeper than the limit are refused by the glue (`check_result_depth`); do the same here.
-    if datum::check_depth(&d, ctx().0.max_depth).is_err() {
-        return;
-    }
     let again = store(d.body).expect("a stored body normalizes");
     assert_eq!(again, stored, "normalization is not idempotent");
 

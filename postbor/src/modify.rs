@@ -8,65 +8,65 @@ use postbor_core::value::Value;
 use crate::access::text_steps;
 use crate::datum::{Cbor, CborOut, PallocBuf};
 use crate::error::{OrRaise, Source};
+use crate::settings::PgCtx;
+use postbor_core::{Ctx, Limits};
 use crate::io::parse_datum;
 
 fn root(c: Cbor<'_>) -> Value<'_> {
     Value::root(parse_datum(c))
 }
 
-/// Runs a core builder into a fresh datum sized after `hint`; the result must respect `postbor.max_depth`.
-pub fn build(hint: usize, f: impl FnOnce(&mut PallocBuf) -> postbor_core::Result<()>) -> CborOut {
+/// Runs a core edit into a fresh datum sized after `hint`, with the session's limits (results respect
+/// `postbor.max_depth`, checked while the index section is built).
+pub fn build(hint: usize, f: impl FnOnce(&mut PallocBuf, &Limits) -> postbor_core::Result<()>) -> CborOut {
     let mut out = PallocBuf::varlena(hint + 16);
-    f(&mut out).or_raise(Source::Stored);
-    check_result_depth(postbor_core::OutBuf::as_slice(&out));
-    CborOut(out.into_varlena())
-}
-
-/// Edits can add nesting levels; a result deeper than input accepts could not be dumped and restored.
-pub fn check_result_depth(datum: &[u8]) {
-    use postbor_core::Ctx;
-    let d = postbor_core::datum::Datum::parse(datum).or_raise(Source::Stored);
-    postbor_core::datum::check_depth(&d, crate::settings::PgCtx::new().limits().max_depth)
-        .map_err(|e| postbor_core::Error::new(e.kind, postbor_core::error::NO_OFFSET))
+    let limits = *PgCtx::new().limits();
+    f(&mut out, &limits)
+        .map_err(|e| match e.kind {
+            // Offsets into the new value mean nothing to the caller.
+            postbor_core::ErrorKind::DepthLimit => postbor_core::Error::new(e.kind, postbor_core::error::NO_OFFSET),
+            _ => e,
+        })
         .or_raise(Source::Stored);
+    CborOut(out.into_varlena())
 }
 
 #[pg_operator(immutable, strict, parallel_safe)]
 #[opname(||)]
 fn cbor_concat(a: Cbor<'_>, b: Cbor<'_>) -> CborOut {
-    build(a.0.len() + b.0.len(), |o| edit::concat(&root(a), &root(b), o))
+    build(a.0.len() + b.0.len(), |o, l| edit::concat(&root(a), &root(b), o, l))
 }
 
 #[pg_operator(immutable, strict, parallel_safe, name = "cbor_delete")]
 #[opname(-)]
 fn cbor_delete_text(doc: Cbor<'_>, key: &str) -> CborOut {
-    build(doc.0.len(), |o| edit::delete_matching(&root(doc), &[key_text(key)], o))
+    build(doc.0.len(), |o, l| edit::delete_matching(&root(doc), &[key_text(key)], o, l))
 }
 
 #[pg_operator(immutable, strict, parallel_safe, name = "cbor_delete")]
 #[opname(-)]
 fn cbor_delete_texts(doc: Cbor<'_>, keys: Array<'_, &str>) -> CborOut {
     let keys: Vec<Vec<u8>> = keys.iter().flatten().map(key_text).collect();
-    build(doc.0.len(), |o| edit::delete_matching(&root(doc), &keys, o))
+    build(doc.0.len(), |o, l| edit::delete_matching(&root(doc), &keys, o, l))
 }
 
 #[pg_operator(immutable, strict, parallel_safe, name = "cbor_delete")]
 #[opname(-)]
 fn cbor_delete_index(doc: Cbor<'_>, idx: i32) -> CborOut {
-    build(doc.0.len(), |o| edit::delete_index(&root(doc), i64::from(idx), o))
+    build(doc.0.len(), |o, l| edit::delete_index(&root(doc), i64::from(idx), o, l))
 }
 
 #[pg_operator(immutable, strict, parallel_safe, name = "cbor_delete")]
 #[opname(-)]
 fn cbor_delete_bytes(doc: Cbor<'_>, key: &[u8]) -> CborOut {
-    build(doc.0.len(), |o| edit::delete_matching(&root(doc), &[key_bytes(key)], o))
+    build(doc.0.len(), |o, l| edit::delete_matching(&root(doc), &[key_bytes(key)], o, l))
 }
 
 /// Typed key: removes a map key of any type, or the array elements equal to it.
 #[pg_extern(immutable, strict, parallel_safe, name = "cbor_delete")]
 fn cbor_delete_key(doc: Cbor<'_>, key: Cbor<'_>) -> CborOut {
     let k = root(key).bytes().or_raise(Source::Stored).to_vec();
-    build(doc.0.len(), |o| edit::delete_matching(&root(doc), &[k], o))
+    build(doc.0.len(), |o, l| edit::delete_matching(&root(doc), &[k], o, l))
 }
 
 fn typed_steps<'a>(path: &Value<'a>) -> Vec<Step<'a>> {
@@ -96,8 +96,8 @@ fn with_text_path<R>(path: Array<'_, &str>, f: impl FnOnce(Option<&[Step]>) -> R
 #[opname(#-)]
 fn cbor_delete_text_path(doc: Cbor<'_>, path: Array<'_, &str>) -> CborOut {
     with_text_path(path, |steps| match steps {
-        Some(s) => build(doc.0.len(), |o| edit::delete_path(&root(doc), s, o)),
-        None => build(doc.0.len(), |o| edit::copy_value(&root(doc), o)),
+        Some(s) => build(doc.0.len(), |o, l| edit::delete_path(&root(doc), s, o, l)),
+        None => build(doc.0.len(), |o, _| edit::copy_value(&root(doc), o)),
     })
 }
 
@@ -105,13 +105,13 @@ fn cbor_delete_text_path(doc: Cbor<'_>, path: Array<'_, &str>) -> CborOut {
 fn cbor_delete_path(doc: Cbor<'_>, path: Cbor<'_>) -> CborOut {
     let p = root(path);
     let steps = typed_steps(&p);
-    build(doc.0.len(), |o| edit::delete_path(&root(doc), &steps, o))
+    build(doc.0.len(), |o, l| edit::delete_path(&root(doc), &steps, o, l))
 }
 
 fn set_text(target: Cbor<'_>, path: Array<'_, &str>, new: Cbor<'_>, mode: SetMode) -> CborOut {
     let newbody = parse_datum(new).body;
     with_text_path(path, |steps| match steps {
-        Some(s) => build(target.0.len() + newbody.len(), |o| edit::set_path(&root(target), s, newbody, mode, o)),
+        Some(s) => build(target.0.len() + newbody.len(), |o, l| edit::set_path(&root(target), s, newbody, mode, o, l)),
         None => crate::error::raise(
             postbor_core::Error::new(
                 postbor_core::ErrorKind::InvalidArgument("path element must not be null"),
@@ -126,7 +126,7 @@ fn set_typed(target: Cbor<'_>, path: Cbor<'_>, new: Cbor<'_>, mode: SetMode) -> 
     let newbody = parse_datum(new).body;
     let p = root(path);
     let steps = typed_steps(&p);
-    build(target.0.len() + newbody.len(), |o| edit::set_path(&root(target), &steps, newbody, mode, o))
+    build(target.0.len() + newbody.len(), |o, l| edit::set_path(&root(target), &steps, newbody, mode, o, l))
 }
 
 #[pg_extern(immutable, strict, parallel_safe)]
@@ -193,7 +193,7 @@ fn cbor_set_lax(
         }
         NullTreatment::UseNull => set_text(target, path, crate::datum::cbor_bytes(&CBOR_NULL), SetMode::Set { create: create_if_missing }),
         NullTreatment::Delete => cbor_delete_text_path(target, path),
-        NullTreatment::ReturnTarget => build(target.0.len(), |o| edit::copy_value(&root(target), o)),
+        NullTreatment::ReturnTarget => build(target.0.len(), |o, _| edit::copy_value(&root(target), o)),
     })
 }
 
@@ -203,5 +203,5 @@ fn cbor_strip_nulls(
     strip_in_arrays: default!(bool, false),
     strip_undefined: default!(bool, false),
 ) -> CborOut {
-    build(target.0.len(), |o| edit::strip_nulls(&root(target), strip_in_arrays, strip_undefined, o))
+    build(target.0.len(), |o, l| edit::strip_nulls(&root(target), strip_in_arrays, strip_undefined, o, l))
 }

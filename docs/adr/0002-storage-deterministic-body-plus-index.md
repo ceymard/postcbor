@@ -2,7 +2,7 @@
 
 A datum is a one-byte header, then the value in deterministic encoding (the body), then an optional index section listing entry offsets for containers with many entries. The body is still valid CBOR, so output, `send`/`recv` and `::bytea` are plain copies, and equality is a byte comparison. The index section gives binary search and direct jumps inside large containers, which plain CBOR cannot do: arrays and maps record item counts, not byte lengths, so reaching an entry means walking every earlier entry.
 
-Offsets in entry tables are relative to their container's start, and the container directory is in body order. Extracting a sub-value is therefore a copy of a body slice plus a contiguous run of index entries, shifted by a constant.
+Entry tables keep the offset of every 8th entry only, in 2 bytes when they fit: a first version with a 4-byte offset per entry made large values about 37% bigger than their body and kept them from compressing, so they ended up larger than jsonb. Offsets are relative to their container's start, and the container directory is in body order. Extracting a sub-value is therefore a copy of a body slice plus a contiguous run of index entries, shifted by a constant.
 
 ## Considered options
 

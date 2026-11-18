@@ -148,7 +148,7 @@ mod tests {
         let mut body = Vec::new();
         f(text, &mut body).unwrap();
         let mut d = Vec::new();
-        crate::datum::from_body(&body, &mut d).unwrap();
+        crate::datum::from_body(&body, &mut d, usize::MAX).unwrap();
         let mut out = Vec::new();
         edn::print(&Value::root(Datum::parse(&d).unwrap()), &mut out, Default::default()).unwrap();
         String::from_utf8(out).unwrap()

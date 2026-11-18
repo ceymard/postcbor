@@ -30,13 +30,13 @@ fuzz_target!(|input: (Vec<u8>, Vec<u8>, Op)| {
     let (va, vb) = (Value::root(Datum::parse(&a).unwrap()), Value::root(Datum::parse(&b).unwrap()));
     let mut out = Vec::new();
     let r = match &input.2 {
-        Op::Concat => edit::concat(&va, &vb, &mut out),
-        Op::DeleteKey(k) => edit::delete_matching(&va, &[ops::key_text(k)], &mut out),
-        Op::DeleteIndex(i) => edit::delete_index(&va, *i, &mut out),
-        Op::DeletePath(p) => edit::delete_path(&va, &steps(p), &mut out),
-        Op::Set(p, create) => edit::set_path(&va, &steps(p), vb.d.body, SetMode::Set { create: *create }, &mut out),
-        Op::Insert(p, after) => edit::set_path(&va, &steps(p), vb.d.body, SetMode::Insert { after: *after }, &mut out),
-        Op::StripNulls(arr, undef) => edit::strip_nulls(&va, *arr, *undef, &mut out),
+        Op::Concat => edit::concat(&va, &vb, &mut out, &postbor_fuzz::ctx().0),
+        Op::DeleteKey(k) => edit::delete_matching(&va, &[ops::key_text(k)], &mut out, &postbor_fuzz::ctx().0),
+        Op::DeleteIndex(i) => edit::delete_index(&va, *i, &mut out, &postbor_fuzz::ctx().0),
+        Op::DeletePath(p) => edit::delete_path(&va, &steps(p), &mut out, &postbor_fuzz::ctx().0),
+        Op::Set(p, create) => edit::set_path(&va, &steps(p), vb.d.body, SetMode::Set { create: *create }, &mut out, &postbor_fuzz::ctx().0),
+        Op::Insert(p, after) => edit::set_path(&va, &steps(p), vb.d.body, SetMode::Insert { after: *after }, &mut out, &postbor_fuzz::ctx().0),
+        Op::StripNulls(arr, undef) => edit::strip_nulls(&va, *arr, *undef, &mut out, &postbor_fuzz::ctx().0),
         Op::Contains => {
             let _ = ops::contains(&va, &vb, &mut postbor_fuzz::ctx()).unwrap();
             return;

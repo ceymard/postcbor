@@ -77,26 +77,26 @@ header = 1 byte:
          bits 3-7  reserved, 0
 body   = deterministic encoding of the value
 index  = dir_count:u32
-         dir_count × { container_offset:u32, table_offset:u32 }
-         tables: u32 entries, in directory order
+         dir_count × { container_offset:u32, table:u32 }
+         tables: sampled entry offsets, u16 or u32 each, in directory order
 body_len = u32 little-endian, the last 4 bytes of the datum, present only when has_index
 ```
 
 - `body_len` sits at the end, not after the header, so the body can be written straight into the output buffer before it is known whether an index section will follow. The header byte is written last, in place.
-
 - All integers in the index section are little-endian. They are read through the cursor (`from_le_bytes` on slices), so nothing needs alignment.
-- **Indexed container**: an array or map with at least `INDEX_THRESHOLD` entries. The constant starts at 16 and is tuned by benchmark. Smaller containers are scanned directly.
-- **Container directory**: one entry per indexed container, sorted by `container_offset` (offset of the container's head from the start of the body), which is depth-first body order. `table_offset` is the position of its entry table, in u32 units, from the start of the tables area.
-- **Entry table**: n u32 offsets, where n is the item count from the container head. Each offset is relative to the container's start and points at an array element, or at a map key (its value follows the key).
+- **Indexed container**: an array or map with at least `INDEX_THRESHOLD` (16) entries. Smaller containers are scanned directly.
+- **Container directory**: one entry per indexed container, sorted by `container_offset` (offset of the container's head from the start of the body), which is depth-first body order. `table` is the byte position of its entry table in the tables area; its top bit set means the table holds 2-byte offsets.
+- **Entry table**: the offset of every `STRIDE`-th (8th) entry: entries 0, 8, 16, …, so ⌈n / 8⌉ offsets for n entries. Each offset is relative to the container's start and points at an array element, or at a map key (its value follows the key). A table uses 2-byte offsets when all of them fit, 4-byte otherwise. Sampling and narrow offsets cut the index from 4 bytes to about 0.25 byte per entry, which lets large values compress (see the benchmark in `TODO.md`).
 - **Lookups**:
-  - Array element i: one table read.
-  - Map key: binary search over the entry table, comparing the lookup key's deterministic encoding with each stored key bytewise.
+  - Array element i: read sample ⌊i / 8⌋, then step over i mod 8 elements.
+  - Map key: binary search over the sampled keys (comparing the lookup key's deterministic encoding bytewise) for the last sample ≤ the key, then scan at most 8 entries from it.
+  - Skipping a whole indexed container: jump to its last sample, then step over the rest.
   - To descend into a nested container: binary search the directory for its offset.
 - **Extracting a sub-value** at body range `[s, e)`:
   1. The directory entries with `s ≤ container_offset < e` form a contiguous run `[a, b)`, and their tables are contiguous too.
-  2. The new datum is: a header, the body slice, then (if `b > a`) the directory run with `container_offset − s` and `table_offset − table_offset[a]`, the table slice, and `body_len`.
+  2. The new datum is: a header, the body slice, then (if `b > a`) the directory run with `container_offset − s` and table positions moved down by the run's first table position (width flags kept), the table bytes, and `body_len`.
   3. No entry table is rebuilt.
-- **Building**: the index is built in the same pass that writes the body. Directory and entry tables collect in scratch memory while the body is written, then are appended after it. Functions that modify a value re-encode through the same writer.
+- **Building**: the index is built in one walk over the finished body (also used for values built by edits). The same walk enforces `postbor.max_depth`.
 - **Detoasting**: datums are read with `pg_detoast_datum_packed` (a 1-byte varlena header is fine, since we only read bytes).
 - **Format version**: any version other than 0 is rejected with an error asking the user to upgrade the extension.
 

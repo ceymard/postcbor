@@ -51,26 +51,28 @@ pub fn from_cbor_with(input: &[u8], out: &mut impl OutBuf, ctx: &mut impl Ctx, d
     let base = out.len();
     out.write_byte(VERSION)?;
     if normalize_unpacking(input, out, ctx, dups)? {
-        finish_index(out, base)?;
+        finish_index(out, base, ctx.limits().max_depth)?;
     }
     Ok(())
 }
 
 /// Appends a datum for a body that is already deterministic (built by our own writer).
-pub fn from_body(body: &[u8], out: &mut impl OutBuf) -> Result<()> {
+pub fn from_body(body: &[u8], out: &mut impl OutBuf, max_depth: usize) -> Result<()> {
     let base = out.len();
     out.write_byte(VERSION)?;
     out.write_bytes(body)?;
-    finish_index(out, base)
+    finish_index(out, base, max_depth)
 }
 
-/// Builds and appends the index section for the body written after the header at `base`.
-pub fn finish_index(out: &mut impl OutBuf, base: usize) -> Result<()> {
+/// Builds and appends the index section for the body written after the header at `base`. The same walk enforces
+/// `max_depth`: edits can add levels (`||` wraps scalars in an array), and a stored value deeper than input
+/// accepts could not be dumped and restored.
+pub fn finish_index(out: &mut impl OutBuf, base: usize, max_depth: usize) -> Result<()> {
     let body_start = base + 1;
     let body_len = out.len() - body_start;
     let built = {
         let body = out.as_slice().get(body_start..).ok_or(Error::new(ErrorKind::CorruptDatum, base))?;
-        index::build(body)?
+        index::build(body, max_depth)?
     };
     if built.dir.is_empty() {
         return Ok(());
@@ -79,42 +81,6 @@ pub fn finish_index(out: &mut impl OutBuf, base: usize) -> Result<()> {
     let body_len = u32::try_from(body_len).map_err(|_| Error::new(ErrorKind::ExpansionLimit, body_len))?;
     out.write_bytes(&body_len.to_le_bytes())?;
     out.as_mut_slice()[base] |= HAS_INDEX;
-    Ok(())
-}
-
-/// Fails with `DepthLimit` when the stored value nests deeper than `max_depth` (arrays, maps and tags).
-/// Edits can add levels (`||` wraps scalars in an array); their results must stay readable by input.
-pub fn check_depth(d: &Datum, max_depth: usize) -> Result<()> {
-    let mut c = Cursor::new(d.body);
-    // Items left at each open level.
-    let mut stack: Vec<u64> = Vec::new();
-    let mut pending: u64 = 1;
-    while pending > 0 || !stack.is_empty() {
-        if pending == 0 {
-            pending = stack.pop().unwrap_or(0);
-            continue;
-        }
-        pending -= 1;
-        let at = c.pos();
-        let h = c.head().map_err(|e| Error::new(ErrorKind::CorruptDatum, e.offset))?;
-        let children = match h.major {
-            crate::cursor::MAJOR_BYTES | crate::cursor::MAJOR_TEXT => {
-                c.take(h.arg).map_err(|e| Error::new(ErrorKind::CorruptDatum, e.offset))?;
-                0
-            }
-            crate::cursor::MAJOR_ARRAY => h.arg,
-            crate::cursor::MAJOR_MAP => h.arg.checked_mul(2).ok_or(Error::new(ErrorKind::CorruptDatum, at))?,
-            crate::cursor::MAJOR_TAG => 1,
-            _ => continue,
-        };
-        if h.major >= crate::cursor::MAJOR_ARRAY {
-            if stack.len() + 1 > max_depth {
-                return Err(Error::new(ErrorKind::DepthLimit, at));
-            }
-            crate::out::try_push(&mut stack, pending)?;
-            pending = children;
-        }
-    }
     Ok(())
 }
 
@@ -130,13 +96,14 @@ pub fn write_subvalue(d: &Datum, start: usize, end: usize, out: &mut impl OutBuf
     if a == b {
         return Ok(());
     }
-    let t0 = ix.dir_entry(a)?.1;
-    let t1 = if b < ix.dir_len() { ix.dir_entry(b)?.1 } else { ix.tables_len() };
+    // Tables of the run are contiguous: copy them and shift positions, keeping each width flag.
+    let t0 = index::table_pos(ix.dir_entry(a)?.1);
+    let t1 = if b < ix.dir_len() { index::table_pos(ix.dir_entry(b)?.1) } else { ix.tables_len() };
     out.write_bytes(&((b - a) as u32).to_le_bytes())?;
     for i in a..b {
         let (off, t) = ix.dir_entry(i)?;
         out.write_bytes(&((off - start) as u32).to_le_bytes())?;
-        out.write_bytes(&((t - t0) as u32).to_le_bytes())?;
+        out.write_bytes(&index::shift_table_word(t, t0)?.to_le_bytes())?;
     }
     out.write_bytes(ix.tables_bytes(t0, t1)?)?;
     out.write_bytes(&(body.len() as u32).to_le_bytes())?;
@@ -187,7 +154,9 @@ mod tests {
         // Second inner array starts after the outer head and the first inner array (1 + 2n bytes each).
         let inner = 1 + 1 + 2 * n;
         let t = ix.table_for(inner).unwrap().unwrap();
-        assert_eq!(ix.entry(t, 5).unwrap(), 1 + 2 * 5);
+        // Samples are entries 0, 8, …; offsets fit 2 bytes.
+        assert!(t.narrow);
+        assert_eq!(ix.sample(t, 1).unwrap(), 1 + 2 * 8);
     }
 
     #[test]
@@ -200,8 +169,8 @@ mod tests {
         let d = datum(&input);
         let ix = Datum::parse(&d).unwrap().index.unwrap();
         let t = ix.table_for(0).unwrap().unwrap();
-        for i in 0..n {
-            assert_eq!(ix.entry(t, i).unwrap(), 1 + 3 * i);
+        for k in 0..n / 8 {
+            assert_eq!(ix.sample(t, k).unwrap(), 1 + 3 * 8 * k);
         }
     }
 
@@ -225,13 +194,30 @@ mod tests {
     }
 
     #[test]
-    fn depth_counts_containers_and_tags() {
-        let d = datum(&[0x81, 0xc1, 0x81, 0x00]);
+    fn index_build_enforces_depth_on_containers_and_tags() {
+        let body = [0x81, 0xc1, 0x81, 0x00];
+        let mut out = Vec::new();
+        assert!(from_body(&body, &mut out, 3).is_ok());
+        assert_eq!(from_body(&body, &mut Vec::new(), 2).unwrap_err().kind, ErrorKind::DepthLimit);
+        assert!(from_body(&[0x83, 0x81, 0x00, 0x81, 0x00, 0x81, 0x00], &mut Vec::new(), 2).is_ok());
+    }
+
+    #[test]
+    fn large_containers_use_four_byte_offsets() {
+        // 20 elements of 5000 bytes: sample offsets pass 65535.
+        let mut input = vec![0x94];
+        for _ in 0..20 {
+            input.extend([0x59, 0x13, 0x88]);
+            input.extend(std::iter::repeat_n(0u8, 5000));
+        }
+        let d = datum(&input);
         let p = Datum::parse(&d).unwrap();
-        assert!(check_depth(&p, 3).is_ok());
-        assert_eq!(check_depth(&p, 2).unwrap_err().kind, ErrorKind::DepthLimit);
-        let flat = datum(&[0x83, 0x81, 0x00, 0x81, 0x00, 0x81, 0x00]);
-        assert!(check_depth(&Datum::parse(&flat).unwrap(), 2).is_ok());
+        let t = p.index.unwrap().table_for(0).unwrap().unwrap();
+        assert!(!t.narrow);
+        let v = crate::value::Value::root(p);
+        for i in 0..20 {
+            assert_eq!(v.array_get(i).unwrap().unwrap().pos, 1 + i as usize * 5003);
+        }
     }
 
     #[test]

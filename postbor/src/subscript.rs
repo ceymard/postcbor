@@ -10,7 +10,7 @@ use postbor_core::ops::get_text_path;
 use postbor_core::value::Value;
 
 use crate::access::value_out;
-use crate::datum::{Cbor, PallocBuf, cbor_oid};
+use crate::datum::{Cbor, cbor_oid};
 use crate::error::{OrRaise, Source, fail};
 use crate::io::parse_datum;
 
@@ -246,10 +246,8 @@ unsafe extern "C-unwind" fn assign(_state: *mut pg_sys::ExprState, op: *mut pg_s
         let root = container.map(|c| Value::root(parse_datum(c)));
         let cb = parsed(&subs);
         let path = steps(&subs, &cb);
-        let mut out = PallocBuf::varlena(container.map_or(0, |c| c.0.len()) + new.len() + 16);
-        edit::assign(root.as_ref(), &path, new, &mut out).or_raise(Source::Stored);
-        crate::modify::check_result_depth(postbor_core::OutBuf::as_slice(&out));
-        *(*op).resvalue = pg_sys::Datum::from(out.into_varlena());
+        let out = crate::modify::build(container.map_or(0, |c| c.0.len()) + new.len(), |o, l| edit::assign(root.as_ref(), &path, new, o, l));
+        *(*op).resvalue = pg_sys::Datum::from(out.0);
         *(*op).resnull = false;
     }
 }

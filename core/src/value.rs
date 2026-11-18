@@ -4,7 +4,7 @@ use crate::cursor::*;
 use crate::datum::Datum;
 use crate::error::{Error, ErrorKind, Result};
 use crate::float;
-use crate::index::INDEX_THRESHOLD;
+use crate::index::{INDEX_THRESHOLD, STRIDE, Table};
 
 /// The decoded content of one item. Container variants carry their entry count.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -108,12 +108,15 @@ impl<'a> Value<'a> {
         let n = h.arg;
         let idx = if i < 0 { n.checked_sub(i.unsigned_abs()) } else { Some(i as u64) };
         let Some(idx) = idx.filter(|&x| x < n) else { return Ok(None) };
-        if let Some(t) = self.table()? {
-            let off = self.d.index.ok_or(corrupt(self.pos))?.entry(t, idx as usize)?;
-            return Ok(Some(self.at(self.pos + off)));
-        }
-        let mut p = first;
-        for _ in 0..idx {
+        // Jump to the sample at or before the element, then step over the rest.
+        let (mut p, skip) = match self.table()? {
+            Some(t) => {
+                let off = self.d.index.ok_or(corrupt(self.pos))?.sample(t, (idx / STRIDE) as usize)?;
+                (self.pos.checked_add(off).ok_or(corrupt(self.pos))?, idx % STRIDE)
+            }
+            None => (first, idx),
+        };
+        for _ in 0..skip {
             p = end_of(&self.d, p)?;
         }
         Ok(Some(self.at(p)))
@@ -125,12 +128,15 @@ impl<'a> Value<'a> {
         if h.major != MAJOR_MAP {
             return Ok(None);
         }
+        // With an index: binary search the sampled keys for the last one ≤ `key`, then scan from there.
+        let (mut p, mut left) = (first, h.arg);
         if let Some(t) = self.table()? {
             let ix = self.d.index.ok_or(corrupt(self.pos))?;
-            let (mut lo, mut hi) = (0usize, h.arg as usize);
+            let samples = h.arg.div_ceil(STRIDE) as usize;
+            let (mut lo, mut hi) = (0usize, samples);
             while lo < hi {
                 let mid = lo + (hi - lo) / 2;
-                let k = self.at(self.pos + ix.entry(t, mid)?);
+                let k = self.at(self.pos + ix.sample(t, mid)?);
                 let kend = k.end()?;
                 match self.d.body.get(k.pos..kend).ok_or(corrupt(k.pos))?.cmp(key) {
                     core::cmp::Ordering::Less => lo = mid + 1,
@@ -138,10 +144,14 @@ impl<'a> Value<'a> {
                     core::cmp::Ordering::Equal => return Ok(Some(self.at(kend))),
                 }
             }
-            return Ok(None);
+            // Every sampled key before `lo` is smaller: the key, if present, follows sample `lo - 1`.
+            if lo == 0 {
+                return Ok(None);
+            }
+            p = self.pos + ix.sample(t, lo - 1)?;
+            left = (h.arg - (lo as u64 - 1) * STRIDE).min(STRIDE);
         }
-        let mut p = first;
-        for _ in 0..h.arg {
+        for _ in 0..left {
             let kend = end_of(&self.d, p)?;
             match self.d.body.get(p..kend).ok_or(corrupt(p))?.cmp(key) {
                 core::cmp::Ordering::Less => p = end_of(&self.d, kend)?,
@@ -154,7 +164,7 @@ impl<'a> Value<'a> {
     }
 
     /// Entry table of this container, when it is indexed.
-    fn table(&self) -> Result<Option<usize>> {
+    fn table(&self) -> Result<Option<Table>> {
         match self.d.index {
             Some(ix) => ix.table_for(self.pos),
             None => Ok(None),
@@ -193,10 +203,11 @@ pub fn end_of(d: &Datum, pos: usize) -> Result<usize> {
                 if h.arg >= INDEX_THRESHOLD
                     && let Some(ix) = d.index
                         && let Some(t) = ix.table_for(item)? {
-                            // Jump to the last entry; only it (and its value) remain to skip.
-                            let last = ix.entry(t, (h.arg - 1) as usize)?;
+                            // Jump to the last sample; only the entries from it to the end remain to skip.
+                            let k = (h.arg - 1) / STRIDE;
+                            let last = ix.sample(t, k as usize)?;
                             c = Cursor::at(d.body, item.checked_add(last).ok_or(corrupt(item))?);
-                            pending += per;
+                            pending += (h.arg - k * STRIDE) * per;
                             continue;
                         }
                 pending = h.arg.checked_mul(per).and_then(|n| n.checked_add(pending)).ok_or(corrupt(item))?;
