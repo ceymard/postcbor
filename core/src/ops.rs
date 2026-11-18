@@ -39,9 +39,9 @@ impl Key {
     }
 }
 
-/// Deterministic encoding of a text key.
-pub fn key_text(s: &str) -> Key {
-    key_with(MAJOR_TEXT, s.as_bytes())
+/// Deterministic encoding of a text key, given as UTF-8 bytes.
+pub fn key_text(s: &(impl AsRef<[u8]> + ?Sized)) -> Key {
+    key_with(MAJOR_TEXT, s.as_ref())
 }
 
 /// Deterministic encoding of a byte-string key.
@@ -138,7 +138,7 @@ pub fn get_typed_path<'a>(v: &Value<'a>, path: &Value) -> Result<Option<Value<'a
 }
 
 /// `? text`: the map has this text key, or the array has this text string as an element.
-pub fn exists_text(v: &Value, s: &str) -> Result<bool> {
+pub fn exists_text(v: &Value, s: &(impl AsRef<[u8]> + ?Sized)) -> Result<bool> {
     exists_encoded(v, &key_text(s))
 }
 
@@ -167,24 +167,27 @@ enum Frame<'a> {
 }
 
 /// Outcome of starting a containment check.
-enum Step {
+// Boxing the frame would allocate for every container pair.
+#[allow(clippy::large_enum_variant)]
+enum Step<'a> {
     Decided(bool),
-    /// A frame was pushed; its result arrives later.
-    Pushed,
+    /// The answer needs the entries of a container pair.
+    Open(Frame<'a>),
 }
 
 /// `a @> b` with jsonb semantics; tags contain tags of the same number with contained content.
 pub fn contains(a: &Value, b: &Value, ctx: &mut impl crate::ctx::Ctx) -> Result<bool> {
     // Top level only: an array contains a scalar that is one of its elements.
-    if let (Kind::Array(_), kb) = (a.kind()?, b.kind()?)
-        && !matches!(kb, Kind::Array(_) | Kind::Map(_)) {
-            return exists_encoded(a, b.bytes()?);
-        }
-    let mut stack: Vec<Frame> = Vec::new();
-    if let Step::Decided(r) = start(a, b, &mut stack)? {
-        return Ok(r);
+    if a.head()?.0.major == MAJOR_ARRAY && !matches!(b.head()?.0.major, MAJOR_ARRAY | MAJOR_MAP) {
+        return exists_encoded(a, b.bytes()?);
     }
-    // Result of the top frame's last child check; None right after the frame was pushed.
+    let mut top = match start(a, b)? {
+        Step::Decided(r) => return Ok(r),
+        Step::Open(f) => f,
+    };
+    // Frames above `top`; one-level checks, the usual case, never allocate.
+    let mut parents: Vec<Frame> = Vec::new();
+    // Result of `top`'s last child check; None right after it was opened.
     let mut result: Option<bool> = None;
     // O(n·m) on arrays: stays cancellable.
     let mut steps: u32 = 0;
@@ -195,9 +198,8 @@ pub fn contains(a: &Value, b: &Value, ctx: &mut impl crate::ctx::Ctx) -> Result<
         }
         let mut outcome: Option<bool> = None;
         let mut child: Option<(Value, Value)> = None;
-        match stack.last_mut() {
-            None => return Ok(true),
-            Some(Frame::Map { a, b }) => {
+        match &mut top {
+            Frame::Map { a, b } => {
                 if result == Some(false) {
                     outcome = Some(false);
                 } else {
@@ -213,7 +215,7 @@ pub fn contains(a: &Value, b: &Value, ctx: &mut impl crate::ctx::Ctx) -> Result<
                     }
                 }
             }
-            Some(Frame::Array { a, b, cur, cands }) => {
+            Frame::Array { a, b, cur, cands } => {
                 if result == Some(true) {
                     *cur = None;
                 }
@@ -236,39 +238,36 @@ pub fn contains(a: &Value, b: &Value, ctx: &mut impl crate::ctx::Ctx) -> Result<
         }
         result = None;
         if let Some(o) = outcome {
-            stack.pop();
-            if stack.is_empty() {
-                return Ok(o);
+            match parents.pop() {
+                None => return Ok(o),
+                Some(p) => top = p,
             }
             result = Some(o);
-        } else if let Some((ca, cb)) = child
-            && let Step::Decided(r) = start(&ca, &cb, &mut stack)? {
-                result = Some(r);
+        } else if let Some((ca, cb)) = child {
+            match start(&ca, &cb)? {
+                Step::Decided(r) => result = Some(r),
+                Step::Open(f) => parents.push(core::mem::replace(&mut top, f)),
             }
+        }
     }
 }
 
-/// Starts checking that `a` contains `b`: decides scalars directly, pushes a frame for containers.
-fn start<'a>(a: &Value<'a>, b: &Value<'a>, stack: &mut Vec<Frame<'a>>) -> Result<Step> {
+/// Starts checking that `a` contains `b`: decides scalars directly, opens a frame for containers.
+fn start<'a>(a: &Value<'a>, b: &Value<'a>) -> Result<Step<'a>> {
     let (mut a, mut b) = (*a, *b);
     loop {
-        return match (a.kind()?, b.kind()?) {
-            (Kind::Map(_), Kind::Map(_)) => {
-                stack.push(Frame::Map { a, b: b.map_iter()? });
-                Ok(Step::Pushed)
+        let ((ha, _), (hb, _)) = (a.head()?, b.head()?);
+        return match (ha.major, hb.major) {
+            (MAJOR_MAP, MAJOR_MAP) => Ok(Step::Open(Frame::Map { a, b: b.map_iter()? })),
+            (MAJOR_ARRAY, MAJOR_ARRAY) => {
+                Ok(Step::Open(Frame::Array { a, b: b.array_iter()?, cur: None, cands: a.array_iter()? }))
             }
-            (Kind::Array(_), Kind::Array(_)) => {
-                stack.push(Frame::Array { a, b: b.array_iter()?, cur: None, cands: a.array_iter()? });
-                Ok(Step::Pushed)
-            }
-            (Kind::Tag(ta), Kind::Tag(tb)) if ta == tb => {
+            (MAJOR_TAG, MAJOR_TAG) if ha.arg == hb.arg => {
                 a = a.tag_content()?;
                 b = b.tag_content()?;
                 continue;
             }
-            (Kind::Map(_) | Kind::Array(_) | Kind::Tag(_), _) | (_, Kind::Map(_) | Kind::Array(_) | Kind::Tag(_)) => {
-                Ok(Step::Decided(false))
-            }
+            (MAJOR_MAP | MAJOR_ARRAY | MAJOR_TAG, _) | (_, MAJOR_MAP | MAJOR_ARRAY | MAJOR_TAG) => Ok(Step::Decided(false)),
             _ => Ok(Step::Decided(a.bytes()? == b.bytes()?)),
         };
     }

@@ -6,7 +6,7 @@ use postbor_core::datum::write_subvalue;
 use postbor_core::ops;
 use postbor_core::value::{Kind, Value};
 
-use crate::datum::{Cbor, CborOut, PallocBuf, TextOut, VarlenaOut};
+use crate::datum::{ByteaArg, Cbor, CborOut, PallocBuf, TextArg, TextOut, VarlenaOut};
 use crate::error::{OrRaise, Source};
 use crate::io::{parse_datum, print_value};
 
@@ -20,18 +20,19 @@ pub fn value_out(v: &Value) -> CborOut {
 
 /// `->>` rendering: text strings as themselves, null as SQL NULL, anything else as EDN.
 pub fn value_text(v: &Value) -> Option<TextOut> {
-    let mut out = PallocBuf::varlena(16);
-    match v.kind().or_raise(Source::Stored) {
-        Kind::Null => return None,
-        Kind::Text(s) => write_text(&mut out, s),
-        _ => print_value(v, &mut out, false),
-    }
+    // Stored text is valid UTF-8 and the database is UTF-8 (ADR-0010): copied without re-checking.
+    let out = if let Some(s) = v.text_bytes().or_raise(Source::Stored) {
+        let mut out = PallocBuf::varlena(s.len());
+        out.write_bytes(s).or_raise(Source::Stored);
+        out
+    } else if v.kind().or_raise(Source::Stored) == Kind::Null {
+        return None;
+    } else {
+        let mut out = PallocBuf::varlena(16);
+        print_value(v, &mut out, false);
+        out
+    };
     Some(TextOut(VarlenaOut(out.into_varlena())))
-}
-
-/// Appends text (databases are UTF-8, ADR-0010).
-pub fn write_text(out: &mut PallocBuf, s: &str) {
-    out.write_bytes(s.as_bytes()).or_raise(Source::Stored);
 }
 
 fn root(c: Cbor<'_>) -> Value<'_> {
@@ -62,26 +63,26 @@ fn cbor_array_element_text(doc: Cbor<'_>, idx: i32) -> Option<TextOut> {
 
 #[pg_operator(immutable, strict, parallel_safe)]
 #[opname(->)]
-fn cbor_object_field(doc: Cbor<'_>, key: &str) -> Option<CborOut> {
-    root(doc).map_get(&ops::key_text(key)).or_raise(Source::Stored).map(|v| value_out(&v))
+fn cbor_object_field(doc: Cbor<'_>, key: TextArg<'_>) -> Option<CborOut> {
+    root(doc).map_get(&ops::key_text(key.0)).or_raise(Source::Stored).map(|v| value_out(&v))
 }
 
 #[pg_operator(immutable, strict, parallel_safe)]
 #[opname(->>)]
-fn cbor_object_field_text(doc: Cbor<'_>, key: &str) -> Option<TextOut> {
-    root(doc).map_get(&ops::key_text(key)).or_raise(Source::Stored).and_then(|v| value_text(&v))
+fn cbor_object_field_text(doc: Cbor<'_>, key: TextArg<'_>) -> Option<TextOut> {
+    root(doc).map_get(&ops::key_text(key.0)).or_raise(Source::Stored).and_then(|v| value_text(&v))
 }
 
 #[pg_operator(immutable, strict, parallel_safe)]
 #[opname(->)]
-fn cbor_object_field_bytes(doc: Cbor<'_>, key: &[u8]) -> Option<CborOut> {
-    root(doc).map_get(&ops::key_bytes(key)).or_raise(Source::Stored).map(|v| value_out(&v))
+fn cbor_object_field_bytes(doc: Cbor<'_>, key: ByteaArg<'_>) -> Option<CborOut> {
+    root(doc).map_get(&ops::key_bytes(key.0)).or_raise(Source::Stored).map(|v| value_out(&v))
 }
 
 #[pg_operator(immutable, strict, parallel_safe)]
 #[opname(->>)]
-fn cbor_object_field_bytes_text(doc: Cbor<'_>, key: &[u8]) -> Option<TextOut> {
-    root(doc).map_get(&ops::key_bytes(key)).or_raise(Source::Stored).and_then(|v| value_text(&v))
+fn cbor_object_field_bytes_text(doc: Cbor<'_>, key: ByteaArg<'_>) -> Option<TextOut> {
+    root(doc).map_get(&ops::key_bytes(key.0)).or_raise(Source::Stored).and_then(|v| value_text(&v))
 }
 
 #[pg_operator(immutable, strict, parallel_safe)]
@@ -148,8 +149,8 @@ fn cbor_contained(a: Cbor<'_>, b: Cbor<'_>) -> bool {
 #[opname(?)]
 #[restrict(matchingsel)]
 #[join(matchingjoinsel)]
-fn cbor_exists(doc: Cbor<'_>, key: &str) -> bool {
-    ops::exists_text(&root(doc), key).or_raise(Source::Stored)
+fn cbor_exists(doc: Cbor<'_>, key: TextArg<'_>) -> bool {
+    ops::exists_text(&root(doc), key.0).or_raise(Source::Stored)
 }
 
 #[pg_operator(immutable, strict, parallel_safe)]

@@ -78,6 +78,16 @@ impl<'a> Value<'a> {
         })
     }
 
+    /// Content bytes of a text string, without the UTF-8 check `kind` makes; None for other items.
+    pub fn text_bytes(&self) -> Result<Option<&'a [u8]>> {
+        let mut c = Cursor::at(self.d.body, self.pos);
+        let h = c.head().map_err(|e| corrupt(e.offset))?;
+        if h.major != MAJOR_TEXT {
+            return Ok(None);
+        }
+        Ok(Some(c.take(h.arg).map_err(|e| corrupt(e.offset))?))
+    }
+
     /// Body offset just past this item. Jumps over indexed containers through their last entry.
     pub fn end(&self) -> Result<usize> {
         end_of(&self.d, self.pos)

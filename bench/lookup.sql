@@ -1,4 +1,5 @@
--- Rough comparison with jsonb: small documents and large maps. Run with a release build:
+-- Rough comparison with jsonb: small documents and large maps. Run with a release build, on a PostgreSQL built
+-- without assertions (pgrx's own PostgreSQL is not: its timings say little about jsonb vs cbor):
 --   psql -X -f bench/lookup.sql
 \timing on
 DROP TABLE IF EXISTS b_small_j, b_small_c, b_big_j, b_big_c;

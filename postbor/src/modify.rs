@@ -6,7 +6,7 @@ use postbor_core::ops::{key_bytes, key_text};
 use postbor_core::value::Value;
 
 use crate::access::text_steps;
-use crate::datum::{Cbor, CborOut, PallocBuf};
+use crate::datum::{ByteaArg, Cbor, CborOut, PallocBuf, TextArg};
 use crate::error::{OrRaise, Source};
 use crate::settings::PgCtx;
 use postbor_core::{Ctx, Limits};
@@ -39,8 +39,8 @@ fn cbor_concat(a: Cbor<'_>, b: Cbor<'_>) -> CborOut {
 
 #[pg_operator(immutable, strict, parallel_safe, name = "cbor_delete")]
 #[opname(-)]
-fn cbor_delete_text(doc: Cbor<'_>, key: &str) -> CborOut {
-    build(doc.0.len(), |o, l| edit::delete_matching(&root(doc), &[key_text(key).to_vec()], o, l))
+fn cbor_delete_text(doc: Cbor<'_>, key: TextArg<'_>) -> CborOut {
+    build(doc.0.len(), |o, l| edit::delete_matching(&root(doc), &[key_text(key.0).to_vec()], o, l))
 }
 
 #[pg_operator(immutable, strict, parallel_safe, name = "cbor_delete")]
@@ -58,8 +58,8 @@ fn cbor_delete_index(doc: Cbor<'_>, idx: i32) -> CborOut {
 
 #[pg_operator(immutable, strict, parallel_safe, name = "cbor_delete")]
 #[opname(-)]
-fn cbor_delete_bytes(doc: Cbor<'_>, key: &[u8]) -> CborOut {
-    build(doc.0.len(), |o, l| edit::delete_matching(&root(doc), &[key_bytes(key).to_vec()], o, l))
+fn cbor_delete_bytes(doc: Cbor<'_>, key: ByteaArg<'_>) -> CborOut {
+    build(doc.0.len(), |o, l| edit::delete_matching(&root(doc), &[key_bytes(key.0).to_vec()], o, l))
 }
 
 /// Typed key: removes a map key of any type, or the array elements equal to it.

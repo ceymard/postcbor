@@ -53,6 +53,7 @@ impl<'a> Cursor<'a> {
         self.buf
     }
 
+    #[inline]
     pub fn remaining(&self) -> usize {
         self.buf.len().saturating_sub(self.pos)
     }
@@ -65,6 +66,7 @@ impl<'a> Cursor<'a> {
         Error::new(kind, self.pos)
     }
 
+    #[inline]
     pub fn peek(&self) -> Result<u8> {
         self.buf
             .get(self.pos)
@@ -72,6 +74,7 @@ impl<'a> Cursor<'a> {
             .ok_or_else(|| self.err(ErrorKind::Truncated))
     }
 
+    #[inline]
     pub fn byte(&mut self) -> Result<u8> {
         let b = self.peek()?;
         self.pos += 1;
@@ -79,6 +82,7 @@ impl<'a> Cursor<'a> {
     }
 
     /// Takes `n` bytes; fails before any allocation could be sized from `n`.
+    #[inline]
     pub fn take(&mut self, n: u64) -> Result<&'a [u8]> {
         let n = usize::try_from(n).map_err(|_| self.err(ErrorKind::Truncated))?;
         if n > self.remaining() {
@@ -102,13 +106,21 @@ impl<'a> Cursor<'a> {
     }
 
     /// Reads an item head. Rejects reserved additional information and indefinite length on majors 0, 1 and 6.
+    #[inline]
     pub fn head(&mut self) -> Result<Head> {
-        let start = self.pos;
         let ib = self.byte()?;
-        let major = ib >> 5;
-        let info = ib & 0x1f;
+        let (major, info) = (ib >> 5, ib & 0x1f);
+        // Most heads carry their argument in the first byte.
+        if info < 24 {
+            return Ok(Head { major, info, arg: u64::from(info) });
+        }
+        self.head_arg(major, info)
+    }
+
+    /// Rest of a head whose argument follows the first byte.
+    fn head_arg(&mut self, major: u8, info: u8) -> Result<Head> {
+        let start = self.pos - 1;
         let arg = match info {
-            0..=23 => u64::from(info),
             24 => self.uint_be(1)?,
             25 => self.uint_be(2)?,
             26 => self.uint_be(4)?,

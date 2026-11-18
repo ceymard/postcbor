@@ -35,14 +35,58 @@ impl FromDatum for Cbor<'_> {
         if is_null || datum.is_null() {
             return None;
         }
-        // SAFETY: a non-null `cbor` datum is a varlena; detoasting yields one that lives for the call.
-        unsafe {
-            let orig = datum.cast_mut_ptr::<pg_sys::varlena>();
-            let v = pg_sys::pg_detoast_datum_packed(orig);
-            let copy = if v == orig { core::ptr::null_mut() } else { v };
-            Some(Cbor(pgrx::varlena_to_byte_slice(v), copy))
-        }
+        // SAFETY: a non-null `cbor` datum is a varlena.
+        let (bytes, copy) = unsafe { detoast(datum) };
+        Some(Cbor(bytes, copy))
     }
+}
+
+/// Payload of a varlena datum, and the detoasted copy when one was made (else null). Inline values are read in
+/// place without calling into PostgreSQL: the guarded call costs more than most operators' own work.
+///
+/// # Safety
+/// `datum` must point to a varlena that lives for `'a`.
+unsafe fn detoast<'a>(datum: pg_sys::Datum) -> (&'a [u8], *mut pg_sys::varlena) {
+    let orig = datum.cast_mut_ptr::<pg_sys::varlena>();
+    // SAFETY: every varlena starts with at least one header byte.
+    let first = unsafe { *orig.cast::<u8>() };
+    // Compressed (4-byte header, VARATT_IS_4B_C) or out of line / expanded (1-byte header 0x01, VARATT_IS_1B_E).
+    let extended = if cfg!(target_endian = "little") {
+        first == 0x01 || first & 0x03 == 0x02
+    } else {
+        first == 0x80 || first & 0xc0 == 0x40
+    };
+    // SAFETY: the varlena is valid; detoasting returns a varlena in the current memory context.
+    unsafe {
+        let v = if extended { pg_sys::pg_detoast_datum_packed(orig) } else { orig };
+        let copy = if v == orig { core::ptr::null_mut() } else { v };
+        (pgrx::varlena_to_byte_slice(v), copy)
+    }
+}
+
+/// A `text` or `bytea` argument borrowed as bytes. Text is UTF-8 (ADR-0010), so it is not re-checked.
+macro_rules! bytes_arg {
+    ($arg:ident, $sql:literal) => {
+        #[derive(Clone, Copy)]
+        pub struct $arg<'a>(pub &'a [u8]);
+
+        impl FromDatum for $arg<'_> {
+            unsafe fn from_polymorphic_datum(datum: pg_sys::Datum, is_null: bool, _: pg_sys::Oid) -> Option<Self> {
+                // SAFETY: a non-null argument of this type is a varlena that lives for the call.
+                (!is_null && !datum.is_null()).then(|| $arg(unsafe { detoast(datum) }.0))
+            }
+        }
+
+        unsafe impl<'fcx> ArgAbi<'fcx> for $arg<'fcx> {
+            unsafe fn unbox_arg_unchecked(arg: Arg<'_, 'fcx>) -> Self {
+                let index = arg.index();
+                // SAFETY: pgrx calls this only for arguments declared with this SQL type.
+                unsafe { arg.unbox_arg_using_from_datum().unwrap_or_else(|| panic!("argument {index} must not be null")) }
+            }
+        }
+
+        sql_type!($arg<'_>, $sql, TypeOrigin::External);
+    };
 }
 
 /// A `cbor` view over bytes that are not a datum of their own (constants, subscript values).
@@ -104,6 +148,8 @@ sql_type!(CborOut, "cbor", TypeOrigin::ThisExtension);
 pub struct TextOut(pub VarlenaOut);
 pub struct ByteaOut(pub VarlenaOut);
 sql_type!(TextOut, "text", TypeOrigin::External);
+bytes_arg!(TextArg, "text");
+bytes_arg!(ByteaArg, "bytea");
 sql_type!(ByteaOut, "bytea", TypeOrigin::External);
 
 impl IntoDatum for TextOut {
