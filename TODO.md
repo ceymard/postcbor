@@ -89,5 +89,6 @@ Decided 2026-11-19 (design §8 Path queries, ADR-0008).
 - [ ] `.keyvalue()` ids differ from jsonb's except for objects at the top of the document (document in design §8).
 - [x] Core unit tests for the evaluator (hand-built paths, Miri), fuzzing of evaluation, and regression tests at the 256-item cap (`jsonpath` suite).
 - [x] Differential suite on PG 15–17: PG 17 matches PG 18; PG 15 and 16 (fewer jsonpath features) have their own expected output (`jsonpath_diff_1.out`).
-- [ ] Cache the decoded path per call site (design §8); today each call decodes it. Measure with the benchmarks first.
+- [x] Cache the decoded path per call site (`fn_extra`; set-returning functions decode once per call).
+- [ ] Path operators are 3–6× slower than jsonb's on small documents (PG 18 without assertions, 200,000 rows): `@@ '$.id < 1000'` 46 ms vs 10, `@? '$.addr ? (@.city == "c1")'` 52 vs 11, `@? '$.** ? (@ == 1)'` 374 vs 60. Evaluation alone (core, plain host) takes 66 ns for `1 < 1000` and 129 ns for `$.id < 1000`; the profile shows store-forwarding stalls when path items are copied.
 - [ ] GIN support for `@?` / `@@`.

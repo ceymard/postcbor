@@ -4,7 +4,7 @@
 use libfuzzer_sys::fuzz_target;
 use postbor_core::ctx::PlainCtx;
 use postbor_core::datum::Datum;
-use postbor_core::jsonpath::eval::{PlainHost, execute, write_array};
+use postbor_core::jsonpath::eval::{PlainHost, Seq, execute, write_array};
 use postbor_core::jsonpath::{Path, print};
 use postbor_core::value::Value;
 
@@ -27,7 +27,7 @@ fuzz_target!(|data: &[u8]| {
         let d = doc(text);
         let d = Datum::parse(&d).unwrap();
         for throw in [false, true] {
-            let mut found = Vec::new();
+            let mut found = Seq::default();
             if execute(&p, Value::root(&d), Some(Value::root(&vars)), throw, false, &mut PlainHost, Some(&mut found)).is_ok() {
                 write_array(&found, &mut Vec::new(), 1000).unwrap();
             }

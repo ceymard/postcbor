@@ -60,6 +60,7 @@ pub fn set_interrupt_hook(f: fn()) {
 pub struct Ticker(u32);
 
 impl Ticker {
+    #[inline]
     pub fn tick(&mut self) {
         self.0 = self.0.wrapping_add(1);
         if self.0.is_multiple_of(INTERRUPT_EVERY)

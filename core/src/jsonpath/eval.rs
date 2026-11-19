@@ -9,7 +9,7 @@ use std::rc::Rc;
 
 use super::{BinOp, DatetimeMethod, ItemId, Kind, Method, Path, UnOp};
 use crate::ctx::Ticker;
-use crate::cursor::{MAJOR_ARRAY, MAJOR_MAP, MAJOR_NEGATIVE, MAJOR_TEXT, MAJOR_UNSIGNED};
+use crate::cursor::{MAJOR_ARRAY, MAJOR_MAP, MAJOR_NEGATIVE, MAJOR_TAG, MAJOR_TEXT, MAJOR_UNSIGNED};
 use crate::datum;
 use crate::encode::write_head;
 use crate::decimal::Num;
@@ -37,16 +37,26 @@ pub enum Code {
 }
 
 /// Why a path evaluation stopped. Errors raised by the host itself (PostgreSQL's own functions) never come back.
+/// Boxed: results carry it on every return, and it is rare.
 #[derive(Debug)]
-pub enum PathError {
+pub struct PathError(pub Box<PathFail>);
+
+#[derive(Debug)]
+pub enum PathFail {
     /// A corrupt stored value, or a number beyond `numeric`'s range.
     Core(Error),
     Sql(Code, String),
 }
 
+impl PathError {
+    fn sql(code: Code, msg: impl Into<String>) -> Self {
+        PathError(Box::new(PathFail::Sql(code, msg.into())))
+    }
+}
+
 impl From<Error> for PathError {
     fn from(e: Error) -> Self {
-        PathError::Core(e)
+        PathError(Box::new(PathFail::Core(e)))
     }
 }
 
@@ -141,10 +151,15 @@ pub enum JItem<'a> {
     Null,
     Bool(bool),
     Num(Num),
-    Str(Cow<'a, [u8]>),
+    Str(&'a [u8]),
+    /// A string the path computed (`.string()`, `.type()` of datetimes).
+    OwnedStr(Box<[u8]>),
     KeyValue(Rc<KeyValue<'a>>),
-    Datetime(Datetime),
+    /// Boxed, like long decimals, to keep items small.
+    Datetime(Box<Datetime>),
 }
+
+const _: () = assert!(core::mem::size_of::<JItem>() <= 24, "path items are moved often: keep them small");
 
 /// Item types, as jsonpath tells them apart. Byte strings, `undefined` and other simple values are CBOR's own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -162,15 +177,16 @@ enum Ty {
 }
 
 /// Tags the path sees through: all but numbers (2–5) and datetimes (0, 1).
+#[inline]
 fn peel(v: Value) -> R<Value> {
     let mut v = v;
-    while let VKind::Tag(t) = v.kind()? {
-        if t <= 5 && typed_tag(v, t)? {
-            break;
+    loop {
+        let (h, next) = v.head()?;
+        if h.major != MAJOR_TAG || (h.arg <= 5 && typed_tag(v, h.arg)?) {
+            return Ok(v);
         }
-        v = v.tag_content()?;
+        v = Value { d: v.d, pos: next };
     }
-    Ok(v)
 }
 
 /// Whether a tag gives its content a type: tags 2 and 3 always (normalization checks their content); 4 and 5 when
@@ -204,7 +220,7 @@ fn ty(it: &JItem) -> R<Ty> {
         JItem::Null => Ty::Null,
         JItem::Bool(_) => Ty::Bool,
         JItem::Num(_) => Ty::Num,
-        JItem::Str(_) => Ty::Str,
+        JItem::Str(_) | JItem::OwnedStr(_) => Ty::Str,
         JItem::KeyValue(_) => Ty::Object,
         JItem::Datetime(_) => Ty::Datetime,
         JItem::Doc(v) => {
@@ -222,6 +238,67 @@ fn ty(it: &JItem) -> R<Ty> {
                 VKind::Simple(_) => Ty::Simple,
             }
         }
+    })
+}
+
+/// An item seen as jsonpath compares it, with tags peeled once.
+enum Sv<'i> {
+    Null,
+    Bool(bool),
+    Num(Num),
+    Str(&'i [u8]),
+    Bytes(&'i [u8]),
+    Undefined,
+    Simple(u8),
+    Container(Ty),
+    Datetime,
+}
+
+impl Sv<'_> {
+    fn ty(&self) -> Ty {
+        match self {
+            Sv::Null => Ty::Null,
+            Sv::Bool(_) => Ty::Bool,
+            Sv::Num(_) => Ty::Num,
+            Sv::Str(_) => Ty::Str,
+            Sv::Bytes(_) => Ty::Bytes,
+            Sv::Undefined => Ty::Undefined,
+            Sv::Simple(_) => Ty::Simple,
+            Sv::Container(t) => *t,
+            Sv::Datetime => Ty::Datetime,
+        }
+    }
+}
+
+fn scalar<'i>(it: &'i JItem) -> R<Sv<'i>> {
+    let v = match it {
+        JItem::Null => return Ok(Sv::Null),
+        JItem::Bool(b) => return Ok(Sv::Bool(*b)),
+        JItem::Num(n) => return Ok(Sv::Num(n.clone())),
+        JItem::Str(s) => return Ok(Sv::Str(s)),
+        JItem::OwnedStr(s) => return Ok(Sv::Str(s)),
+        JItem::KeyValue(_) => return Ok(Sv::Container(Ty::Object)),
+        JItem::Datetime(_) => return Ok(Sv::Datetime),
+        JItem::Doc(v) => peel(*v)?,
+    };
+    Ok(match v.kind()? {
+        VKind::Unsigned(n) if n <= i64::MAX as u64 => Sv::Num(Num::Int(n as i64)),
+        VKind::Negative(n) if n < i64::MAX as u64 => Sv::Num(Num::Int(-1 - n as i64)),
+        VKind::Tag(0 | 1) => Sv::Datetime,
+        VKind::Unsigned(_) | VKind::Negative(_) | VKind::Float(_) | VKind::Tag(_) => match num_of(&JItem::Doc(v))? {
+            Some(n) => Sv::Num(n),
+            // Not reachable for tags `peel` stopped at; compares as unknown.
+            None => Sv::Container(Ty::Num),
+        },
+        VKind::Text(t) => Sv::Str(t.as_bytes()),
+        VKind::Bytes(b) => Sv::Bytes(b),
+        VKind::Array(_) => Sv::Container(Ty::Array),
+        VKind::Map(_) => Sv::Container(Ty::Object),
+        VKind::False => Sv::Bool(false),
+        VKind::True => Sv::Bool(true),
+        VKind::Null => Sv::Null,
+        VKind::Undefined => Sv::Undefined,
+        VKind::Simple(n) => Sv::Simple(n),
     })
 }
 
@@ -262,7 +339,7 @@ fn num_of(it: &JItem) -> R<Option<Num>> {
         _ => return Ok(None),
     };
     Ok(match v.kind()? {
-        VKind::Unsigned(n) => Some(i64::try_from(n).map_or_else(|_| Num::Dec(crate::decimal::Dec { neg: false, coef: n.to_string().into_bytes(), scale: 0 }), Num::Int)),
+        VKind::Unsigned(n) => Some(i64::try_from(n).map_or_else(|_| Num::Dec(Box::new(crate::decimal::Dec { neg: false, coef: n.to_string().into_bytes(), scale: 0 })), Num::Int)),
         VKind::Negative(n) if n < i64::MAX as u64 => Some(Num::Int(-1 - n as i64)),
         VKind::Float(f) if f.is_nan() => Some(Num::NaN),
         VKind::Float(f) if f.is_infinite() => Some(Num::Inf { neg: f < 0.0 }),
@@ -278,6 +355,7 @@ fn num_of(it: &JItem) -> R<Option<Num>> {
 fn str_of<'i>(it: &'i JItem) -> R<Option<&'i [u8]>> {
     Ok(match it {
         JItem::Str(s) => Some(s),
+        JItem::OwnedStr(s) => Some(s),
         JItem::Doc(v) => match peel(*v)?.kind()? {
             VKind::Text(t) => Some(t.as_bytes()),
             _ => None,
@@ -310,12 +388,13 @@ fn doc_container<'a>(it: &JItem<'a>) -> R<Option<Value<'a>>> {
 }
 
 /// `JsonbArraySize`: the length of an array item, or None.
+#[inline]
 fn array_size(it: &JItem) -> R<Option<u64>> {
     Ok(match it {
-        JItem::Doc(v) => match peel(*v)?.kind()? {
-            VKind::Array(n) => Some(n),
-            _ => None,
-        },
+        JItem::Doc(v) => {
+            let (h, _) = peel(*v)?.head()?;
+            (h.major == MAJOR_ARRAY).then_some(h.arg)
+        }
         _ => None,
     })
 }
@@ -387,7 +466,72 @@ struct Base<'a> {
     id: i32,
 }
 
-type Found<'r, 'a> = Option<&'r mut Vec<JItem<'a>>>;
+/// A list of results that holds one item without allocating, as PostgreSQL's `JsonValueList` does.
+#[derive(Debug, Default)]
+pub struct Seq<'a> {
+    first: Option<JItem<'a>>,
+    rest: Vec<JItem<'a>>,
+}
+
+impl<'a> Seq<'a> {
+    pub fn push(&mut self, it: JItem<'a>) {
+        if self.first.is_none() {
+            self.first = Some(it);
+        } else {
+            self.rest.push(it);
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        usize::from(self.first.is_some()) + self.rest.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.first.is_none()
+    }
+
+    pub fn first(&self) -> Option<&JItem<'a>> {
+        self.first.as_ref()
+    }
+
+    /// The only item, if there is exactly one.
+    pub fn single(&self) -> Option<&JItem<'a>> {
+        if self.rest.is_empty() { self.first.as_ref() } else { None }
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &JItem<'a>> {
+        self.first.iter().chain(self.rest.iter())
+    }
+
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut JItem<'a>> {
+        self.first.iter_mut().chain(self.rest.iter_mut())
+    }
+
+    fn truncate(&mut self, len: usize) {
+        if len == 0 {
+            self.first = None;
+        }
+        self.rest.truncate(len.saturating_sub(1));
+    }
+
+    /// Removes and returns the items from index `at` on.
+    fn split_off(&mut self, at: usize) -> Vec<JItem<'a>> {
+        if at == 0 {
+            return core::mem::take(self).into_iter().collect();
+        }
+        self.rest.split_off((at - 1).min(self.rest.len()))
+    }
+}
+
+impl<'a> IntoIterator for Seq<'a> {
+    type Item = JItem<'a>;
+    type IntoIter = core::iter::Chain<core::option::IntoIter<JItem<'a>>, std::vec::IntoIter<JItem<'a>>>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.first.into_iter().chain(self.rest)
+    }
+}
+
+type Found<'r, 'a> = Option<&'r mut Seq<'a>>;
 
 #[derive(Clone, Copy)]
 enum Pred {
@@ -443,7 +587,12 @@ struct Exec<'a, 'h, H: Host> {
     throw: bool,
     use_tz: bool,
     ticker: Ticker,
+    /// Counts recursive calls, to check the stack every [`STACK_CHECK_EVERY`] of them.
+    calls: u32,
 }
+
+/// Recursion is bounded by the nesting cap; the host's stack check is a safety net, and a call across FFI.
+const STACK_CHECK_EVERY: u32 = 16;
 
 /// Runs `path` over `doc` (`executeJsonPath`). With `found`, every result is appended; without, evaluation stops
 /// at the first result. `throw` false suppresses the errors jsonpath's silent mode suppresses, returning
@@ -455,7 +604,7 @@ pub fn execute<'a, H: Host>(path: &'a Path<'a>, doc: Value<'a>, vars: Option<Val
         Some(v) => {
             let v = peel(v)?;
             if !matches!(v.kind()?, VKind::Map(_)) {
-                return Err(PathError::Sql(Code::InvalidParameter, "\"vars\" argument is not an object".into()));
+                return Err(PathError::sql(Code::InvalidParameter, "\"vars\" argument is not an object"));
             }
             Some(v)
         }
@@ -476,11 +625,12 @@ pub fn execute<'a, H: Host>(path: &'a Path<'a>, doc: Value<'a>, vars: Option<Val
         throw,
         use_tz,
         ticker: Ticker::default(),
+        calls: 0,
     };
     let root = cx.root.clone();
     if !cx.lax && found.is_none() {
         // Strict mode must see every result to know there is no error.
-        let mut vals = Vec::new();
+        let mut vals = Seq::default();
         let res = cx.exec(path.root, &root, Some(&mut vals))?;
         if res == Res::Error {
             return Ok(res);
@@ -493,7 +643,7 @@ pub fn execute<'a, H: Host>(path: &'a Path<'a>, doc: Value<'a>, vars: Option<Val
 impl<'a, H: Host> Exec<'a, '_, H> {
     /// `RETURN_ERROR`: raise, or report a suppressed error.
     fn soft(&self, code: Code, msg: impl FnOnce() -> String) -> R<Res> {
-        if self.throw { Err(PathError::Sql(code, msg())) } else { Ok(Res::Error) }
+        if self.throw { Err(PathError::sql(code, msg())) } else { Ok(Res::Error) }
     }
 
     fn exec(&mut self, id: ItemId, jb: &JItem<'a>, found: Found<'_, 'a>) -> R<Res> {
@@ -512,8 +662,15 @@ impl<'a, H: Host> Exec<'a, '_, H> {
         }
     }
 
+    fn enter(&mut self) {
+        self.calls = self.calls.wrapping_add(1);
+        if self.calls.is_multiple_of(STACK_CHECK_EVERY) {
+            self.host.check_stack();
+        }
+    }
+
     fn exec_opt_unwrap_target(&mut self, id: ItemId, jb: &JItem<'a>, mut found: Found<'_, 'a>, unwrap: bool) -> R<Res> {
-        self.host.check_stack();
+        self.enter();
         self.ticker.tick();
         let item = self.path.item(id);
         let next = item.next;
@@ -613,7 +770,7 @@ impl<'a, H: Host> Exec<'a, '_, H> {
             }
             Kind::Method(Method::Type) => {
                 let t = type_name(jb)?;
-                self.next_item(next, JItem::Str(Cow::Borrowed(t.as_bytes())), found)
+                self.next_item(next, JItem::Str(t.as_bytes()), found)
             }
             Kind::Method(Method::Size) => {
                 let size = match array_size(jb)? {
@@ -674,7 +831,7 @@ impl<'a, H: Host> Exec<'a, '_, H> {
             }
             Kind::Last => {
                 if self.innermost_array_size < 0 {
-                    return Err(PathError::Sql(Code::Internal, "evaluating jsonpath LAST outside of array subscript".into()));
+                    return Err(PathError::sql(Code::Internal, "evaluating jsonpath LAST outside of array subscript"));
                 }
                 if next.is_none() && found.is_none() {
                     return Ok(Res::Ok);
@@ -752,18 +909,26 @@ impl<'a, H: Host> Exec<'a, '_, H> {
     }
 
     /// `executeItemOptUnwrapResult`: in lax mode with `unwrap`, array results are replaced by their elements.
-    fn exec_opt_unwrap_result(&mut self, id: ItemId, jb: &JItem<'a>, unwrap: bool, found: &mut Vec<JItem<'a>>) -> R<Res> {
+    fn exec_opt_unwrap_result(&mut self, id: ItemId, jb: &JItem<'a>, unwrap: bool, found: &mut Seq<'a>) -> R<Res> {
         if unwrap && self.lax {
-            let mut seq = Vec::new();
-            let res = self.exec(id, jb, Some(&mut seq))?;
+            // Results go straight into `found`; only array results are then replaced by their elements.
+            let start = found.len();
+            let res = self.exec(id, jb, Some(found))?;
             if res == Res::Error {
+                found.truncate(start);
                 return Ok(res);
             }
-            for item in seq {
-                if array_size(&item)?.is_some() {
-                    self.unwrap_target_array(None, &item, Some(found), false)?;
-                } else {
-                    found.push(item);
+            let mut arrays = false;
+            for it in found.iter().skip(start) {
+                arrays |= array_size(it)?.is_some();
+            }
+            if arrays {
+                for item in found.split_off(start) {
+                    if array_size(&item)?.is_some() {
+                        self.unwrap_target_array(None, &item, Some(found), false)?;
+                    } else {
+                        found.push(item);
+                    }
                 }
             }
             return Ok(Res::Ok);
@@ -771,7 +936,7 @@ impl<'a, H: Host> Exec<'a, '_, H> {
         self.exec(id, jb, Some(found))
     }
 
-    fn exec_opt_unwrap_result_no_throw(&mut self, id: ItemId, jb: &JItem<'a>, unwrap: bool, found: &mut Vec<JItem<'a>>) -> R<Res> {
+    fn exec_opt_unwrap_result_no_throw(&mut self, id: ItemId, jb: &JItem<'a>, unwrap: bool, found: &mut Seq<'a>) -> R<Res> {
         let saved = self.throw;
         self.throw = false;
         let res = self.exec_opt_unwrap_result(id, jb, unwrap, found);
@@ -780,10 +945,10 @@ impl<'a, H: Host> Exec<'a, '_, H> {
     }
 
     fn bool_item(&mut self, id: ItemId, jb: &JItem<'a>, can_have_next: bool) -> R<Tri> {
-        self.host.check_stack();
+        self.enter();
         let item = self.path.item(id);
         if !can_have_next && item.next.is_some() {
-            return Err(PathError::Sql(Code::Internal, "boolean jsonpath item cannot have next item".into()));
+            return Err(PathError::sql(Code::Internal, "boolean jsonpath item cannot have next item"));
         }
         Ok(match item.kind {
             Kind::Binary(BinOp::And, l, r) => {
@@ -815,7 +980,7 @@ impl<'a, H: Host> Exec<'a, '_, H> {
             Kind::Binary(BinOp::StartsWith, l, r) => self.predicate(l, Some(r), jb, false, Pred::StartsWith)?,
             Kind::LikeRegex { expr, .. } => self.predicate(expr, None, jb, false, Pred::Regex(id))?,
             Kind::Unary(UnOp::Exists, a) => {
-                let mut vals = Vec::new();
+                let mut vals = Seq::default();
                 if !self.lax {
                     // Strict mode must see every result to know there is no error.
                     if self.exec_opt_unwrap_result_no_throw(a, jb, false, &mut vals)? == Res::Error {
@@ -834,7 +999,7 @@ impl<'a, H: Host> Exec<'a, '_, H> {
                     }
                 }
             }
-            _ => return Err(PathError::Sql(Code::Internal, "invalid boolean jsonpath item type".into())),
+            _ => return Err(PathError::sql(Code::Internal, "invalid boolean jsonpath item type")),
         })
     }
 
@@ -900,19 +1065,19 @@ impl<'a, H: Host> Exec<'a, '_, H> {
     /// `executePredicate`: true when any pair of left and right results satisfies the predicate. Strict mode checks
     /// every pair, so that an error anywhere makes the result unknown.
     fn predicate(&mut self, larg: ItemId, rarg: Option<ItemId>, jb: &JItem<'a>, unwrap_right: bool, pred: Pred) -> R<Tri> {
-        let mut lseq = Vec::new();
+        let mut lseq = Seq::default();
         if self.exec_opt_unwrap_result_no_throw(larg, jb, true, &mut lseq)? == Res::Error {
             return Ok(Tri::Unknown);
         }
-        let mut rseq = Vec::new();
+        let mut rseq = Seq::default();
         if let Some(r) = rarg
             && self.exec_opt_unwrap_result_no_throw(r, jb, unwrap_right, &mut rseq)? == Res::Error
         {
             return Ok(Tri::Unknown);
         }
         let (mut error, mut found) = (false, false);
-        for l in &lseq {
-            let rights: Vec<Option<&JItem<'a>>> = if rarg.is_some() { rseq.iter().map(Some).collect() } else { vec![None] };
+        for l in lseq.iter() {
+            let rights: &mut dyn Iterator<Item = Option<&JItem<'a>>> = if rarg.is_some() { &mut rseq.iter().map(Some) } else { &mut core::iter::once(None) };
             for r in rights {
                 let res = match pred {
                     Pred::Cmp(op) => self.compare_items(op, l, r.unwrap_or(&JItem::Null))?,
@@ -948,17 +1113,17 @@ impl<'a, H: Host> Exec<'a, '_, H> {
 
     fn binary_arith(&mut self, op: BinOp, l: ItemId, r: ItemId, next: Option<ItemId>, jb: &JItem<'a>, found: Found<'_, 'a>) -> R<Res> {
         // PostgreSQL unwraps the operands of every binary operator, not only the multiplicative ones.
-        let mut lseq = Vec::new();
+        let mut lseq = Seq::default();
         let res = self.exec_opt_unwrap_result(l, jb, true, &mut lseq)?;
         if res == Res::Error {
             return Ok(res);
         }
-        let mut rseq = Vec::new();
+        let mut rseq = Seq::default();
         let res = self.exec_opt_unwrap_result(r, jb, true, &mut rseq)?;
         if res == Res::Error {
             return Ok(res);
         }
-        let single = |seq: &[JItem]| -> R<Option<Num>> { if seq.len() == 1 { num_of(&seq[0]) } else { Ok(None) } };
+        let single = |seq: &Seq| -> R<Option<Num>> { seq.single().map_or(Ok(None), num_of) };
         let Some(a) = single(&lseq)? else {
             return self.soft(Code::SingletonRequired, || format!("left operand of jsonpath operator {} is not a single numeric value", op_name(op)));
         };
@@ -985,13 +1150,13 @@ impl<'a, H: Host> Exec<'a, '_, H> {
     }
 
     fn unary_arith(&mut self, op: UnOp, arg: ItemId, next: Option<ItemId>, jb: &JItem<'a>, mut found: Found<'_, 'a>) -> R<Res> {
-        let mut seq = Vec::new();
+        let mut seq = Seq::default();
         let res = self.exec_opt_unwrap_result(arg, jb, true, &mut seq)?;
         if res == Res::Error {
             return Ok(res);
         }
         let mut res = Res::NotFound;
-        for v in &seq {
+        for v in seq.iter() {
             let Some(n) = num_of(v)? else {
                 if found.is_none() && next.is_none() {
                     continue;
@@ -1035,19 +1200,19 @@ impl<'a, H: Host> Exec<'a, '_, H> {
             Kind::Null => JItem::Null,
             Kind::Bool(b) => JItem::Bool(*b),
             Kind::Numeric(n) => JItem::Num(n.clone()),
-            Kind::String(s) => JItem::Str(Cow::Borrowed(s)),
+            Kind::String(s) => JItem::Str(s),
             Kind::Variable(name) => {
                 let v = match self.vars {
                     Some(vars) => vars.map_get(&key_text(name))?,
                     None => None,
                 };
                 let Some(v) = v else {
-                    return Err(PathError::Sql(Code::UndefinedObject, format!("could not find jsonpath variable \"{}\"", lossy(name))));
+                    return Err(PathError::sql(Code::UndefinedObject, format!("could not find jsonpath variable \"{}\"", lossy(name))));
                 };
                 self.base = Base { anchor: self.vars, extra: 0, id: 1 };
                 JItem::Doc(v)
             }
-            _ => return Err(PathError::Sql(Code::Internal, "unexpected jsonpath item type".into())),
+            _ => return Err(PathError::sql(Code::Internal, "unexpected jsonpath item type")),
         })
     }
 
@@ -1064,11 +1229,11 @@ impl<'a, H: Host> Exec<'a, '_, H> {
 
     /// A subscript's value truncated to an integer; None after a suppressed error.
     fn array_index(&mut self, id: ItemId, jb: &JItem<'a>) -> R<Option<i32>> {
-        let mut found = Vec::new();
+        let mut found = Seq::default();
         if self.exec(id, jb, Some(&mut found))? == Res::Error {
             return Ok(None);
         }
-        let n = if found.len() == 1 { num_of(&found[0])? } else { None };
+        let n = found.single().map_or(Ok(None), num_of)?;
         let Some(n) = n else {
             self.soft(Code::InvalidSubscript, || "jsonpath array subscript is not a single numeric value".into())?;
             return Ok(None);
@@ -1096,9 +1261,9 @@ impl<'a, H: Host> Exec<'a, '_, H> {
         let mut entries: Vec<(JItem<'a>, JItem<'a>)> = Vec::new();
         match jb {
             JItem::KeyValue(kv) => {
-                entries.push((JItem::Str(Cow::Borrowed(KV_KEYS[0])), JItem::Num(Num::Int(kv.id))));
-                entries.push((JItem::Str(Cow::Borrowed(KV_KEYS[1])), kv.key.clone()));
-                entries.push((JItem::Str(Cow::Borrowed(KV_KEYS[2])), kv.value.clone()));
+                entries.push((JItem::Str(KV_KEYS[0]), JItem::Num(Num::Int(kv.id))));
+                entries.push((JItem::Str(KV_KEYS[1]), kv.key.clone()));
+                entries.push((JItem::Str(KV_KEYS[2]), kv.value.clone()));
             }
             _ => {
                 if let Some(m) = doc_container(jb)? {
@@ -1132,31 +1297,29 @@ impl<'a, H: Host> Exec<'a, '_, H> {
 
     /// `compareItems`: items of different types are unknown, except that null is unequal to everything else.
     fn compare_items(&mut self, op: BinOp, a: &JItem<'a>, b: &JItem<'a>) -> R<Tri> {
-        let (ta, tb) = (ty(a)?, ty(b)?);
+        let (sa, sb) = (scalar(a)?, scalar(b)?);
+        let (ta, tb) = (sa.ty(), sb.ty());
         if ta != tb {
             if ta == Ty::Null || tb == Ty::Null {
                 return Ok(if op == BinOp::Ne { Tri::True } else { Tri::False });
             }
             return Ok(Tri::Unknown);
         }
-        let cmp = match ta {
-            Ty::Null | Ty::Undefined => Ordering::Equal,
-            Ty::Bool => bool_of(a)?.cmp(&bool_of(b)?),
-            Ty::Num => match (num_of(a)?, num_of(b)?) {
-                (Some(x), Some(y)) => x.cmp_value(&y),
-                _ => return Ok(Tri::Unknown),
-            },
-            // Strings compare by code point, which for UTF-8 is byte order.
-            Ty::Str => str_of(a)?.cmp(&str_of(b)?),
-            Ty::Bytes | Ty::Simple => scalar_bytes(a)?.cmp(&scalar_bytes(b)?),
-            Ty::Array | Ty::Object => return Ok(Tri::Unknown),
-            Ty::Datetime => match (self.datetime_of(a)?, self.datetime_of(b)?) {
+        let cmp = match (sa, sb) {
+            (Sv::Bool(x), Sv::Bool(y)) => x.cmp(&y),
+            (Sv::Num(x), Sv::Num(y)) => x.cmp_value(&y),
+            // Strings compare by code point, which for UTF-8 is byte order; so do byte strings.
+            (Sv::Str(x), Sv::Str(y)) | (Sv::Bytes(x), Sv::Bytes(y)) => x.cmp(y),
+            (Sv::Simple(x), Sv::Simple(y)) => x.cmp(&y),
+            (Sv::Datetime, Sv::Datetime) => match (self.datetime_of(a)?, self.datetime_of(b)?) {
                 (Some(x), Some(y)) => match self.host.datetime_cmp(&x, &y, self.use_tz) {
                     Some(o) => o,
                     None => return Ok(Tri::Unknown),
                 },
                 _ => return Ok(Tri::Unknown),
             },
+            (Sv::Container(_), _) | (_, Sv::Container(_)) => return Ok(Tri::Unknown),
+            _ => Ordering::Equal,
         };
         let res = match op {
             BinOp::Eq => cmp == Ordering::Equal,
@@ -1165,7 +1328,7 @@ impl<'a, H: Host> Exec<'a, '_, H> {
             BinOp::Gt => cmp == Ordering::Greater,
             BinOp::Le => cmp != Ordering::Greater,
             BinOp::Ge => cmp != Ordering::Less,
-            _ => return Err(PathError::Sql(Code::Internal, "unrecognized jsonpath operation".into())),
+            _ => return Err(PathError::sql(Code::Internal, "unrecognized jsonpath operation")),
         };
         Ok(if res { Tri::True } else { Tri::False })
     }
@@ -1174,7 +1337,7 @@ impl<'a, H: Host> Exec<'a, '_, H> {
     /// not a valid timestamp).
     fn datetime_of(&mut self, it: &JItem<'a>) -> R<Option<Datetime>> {
         let v = match it {
-            JItem::Datetime(d) => return Ok(Some(*d)),
+            JItem::Datetime(d) => return Ok(Some(**d)),
             JItem::Doc(v) => peel(*v)?,
             _ => return Ok(None),
         };
@@ -1218,14 +1381,14 @@ impl<'a, H: Host> Exec<'a, '_, H> {
                 Some(p) => DtArg::Precision(p),
                 None => return self.soft(Code::DatetimeArgument, || format!("time precision of jsonpath item method .{name}() is out of range for type integer")),
             },
-            _ => return Err(PathError::Sql(Code::Internal, format!("invalid jsonpath item type for .{name}() argument"))),
+            _ => return Err(PathError::sql(Code::Internal, format!("invalid jsonpath item type for .{name}() argument"))),
         };
         match self.host.datetime(m, arg, s, self.throw, self.use_tz) {
             DtOut::Ok(d) => {
                 if next.is_none() && found.is_none() {
                     return Ok(Res::Ok);
                 }
-                self.next_item(next, JItem::Datetime(d), found)
+                self.next_item(next, JItem::Datetime(Box::new(d)), found)
             }
             DtOut::Suppressed => Ok(Res::Error),
             DtOut::Fail(code, msg) => self.soft(code, || msg),
@@ -1345,36 +1508,24 @@ impl<'a, H: Host> Exec<'a, '_, H> {
                 if text.is_some() {
                     match jb {
                         JItem::Doc(v) => match peel(*v)?.kind()? {
-                            VKind::Text(t) => JItem::Str(Cow::Borrowed(t.as_bytes())),
+                            VKind::Text(t) => JItem::Str(t.as_bytes()),
                             _ => jb.clone(),
                         },
                         _ => jb.clone(),
                     }
                 } else if let Some(n) = &num {
-                    JItem::Str(Cow::Owned(n.to_text().into_bytes()))
+                    JItem::OwnedStr(n.to_text().into_bytes().into())
                 } else if let Some(b) = bool_of(jb)? {
-                    JItem::Str(Cow::Borrowed(if b { b"true" } else { b"false" }))
+                    JItem::Str(if b { b"true" } else { b"false" })
                 } else if let Some(d) = self.datetime_of(jb)? {
-                    JItem::Str(Cow::Owned(self.host.datetime_text(&d).into_bytes()))
+                    JItem::OwnedStr(self.host.datetime_text(&d).into_bytes().into())
                 } else {
                     fail!(Code::NonNumericItem, only("a boolean, string, numeric, or datetime value"))
                 }
             }
-            _ => return Err(PathError::Sql(Code::Internal, "unexpected jsonpath item method".into())),
+            _ => return Err(PathError::sql(Code::Internal, "unexpected jsonpath item method")),
         }))
     }
-}
-
-/// Content of byte strings and the number of simple values, for comparing them.
-fn scalar_bytes<'i>(it: &JItem<'i>) -> R<Vec<u8>> {
-    Ok(match it {
-        JItem::Doc(v) => match peel(*v)?.kind()? {
-            VKind::Bytes(b) => b.to_vec(),
-            VKind::Simple(n) => vec![n],
-            _ => Vec::new(),
-        },
-        _ => Vec::new(),
-    })
 }
 
 fn starts_with(whole: &JItem, initial: &JItem) -> R<Tri> {
@@ -1417,10 +1568,10 @@ fn rfc3339_offset(t: &str) -> Option<i32> {
 }
 
 /// Replaces computed datetimes by their ISO 8601 text, as jsonb returns them.
-pub fn datetimes_to_text<H: Host>(items: &mut [JItem], host: &mut H) {
-    for it in items {
+pub fn datetimes_to_text<H: Host>(items: &mut Seq, host: &mut H) {
+    for it in items.iter_mut() {
         if let JItem::Datetime(d) = it {
-            *it = JItem::Str(Cow::Owned(host.datetime_text(d).into_bytes()));
+            *it = JItem::OwnedStr(host.datetime_text(d).into_bytes().into());
         }
     }
 }
@@ -1444,6 +1595,10 @@ fn write_body(it: &JItem, out: &mut impl OutBuf) -> crate::Result<()> {
         JItem::Num(Num::Int(i)) => write_head(out, MAJOR_NEGATIVE, (-1 - *i) as u64),
         JItem::Num(n) => num::write_numeric(&n.to_text(), out),
         JItem::Str(s) => {
+            write_head(out, MAJOR_TEXT, s.len() as u64)?;
+            out.write_bytes(s)
+        }
+        JItem::OwnedStr(s) => {
             write_head(out, MAJOR_TEXT, s.len() as u64)?;
             out.write_bytes(s)
         }
@@ -1473,11 +1628,11 @@ pub fn write_datum(it: &JItem, out: &mut impl OutBuf, max_depth: usize) -> crate
 }
 
 /// Appends a datum holding an array of results.
-pub fn write_array(items: &[JItem], out: &mut impl OutBuf, max_depth: usize) -> crate::Result<()> {
+pub fn write_array(items: &Seq, out: &mut impl OutBuf, max_depth: usize) -> crate::Result<()> {
     let base = out.len();
     out.write_byte(datum::VERSION)?;
     write_head(out, MAJOR_ARRAY, items.len() as u64)?;
-    for it in items {
+    for it in items.iter() {
         write_body(it, out)?;
     }
     datum::finish_index(out, base, max_depth)
@@ -1645,7 +1800,7 @@ mod tests {
         let path = Path::decode(&bin).unwrap();
         let d = doc(text);
         let d = Datum::parse(&d).unwrap();
-        let mut found = Vec::new();
+        let mut found = Seq::default();
         let res = execute(&path, Value::root(&d), None, throw, false, &mut PlainHost, Some(&mut found)).map_err(|e| format!("{e:?}"))?;
         if res == Res::Error {
             return Err(format!("suppressed after {}", found.len()));
@@ -1714,7 +1869,7 @@ mod tests {
         let bin = compile(false, &[P::Root, P::Any(0, u32::MAX)]);
         let path = Path::decode(&bin).unwrap();
         let d = Datum::parse(&d).unwrap();
-        let mut found = Vec::new();
+        let mut found = Seq::default();
         execute(&path, Value::root(&d), None, true, false, &mut PlainHost, Some(&mut found)).unwrap();
         assert_eq!(found.len(), n + 1);
     }

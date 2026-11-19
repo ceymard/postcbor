@@ -298,7 +298,8 @@ impl Dec {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Num {
     Int(i64),
-    Dec(Dec),
+    /// Boxed: values that need it are rare, and path items stay small.
+    Dec(Box<Dec>),
     NaN,
     Inf { neg: bool },
 }
@@ -307,7 +308,7 @@ impl Num {
     pub fn to_dec(&self) -> Option<Dec> {
         match self {
             Num::Int(i) => Some(Dec::from_i64(*i)),
-            Num::Dec(d) => Some(d.clone()),
+            Num::Dec(d) => Some((**d).clone()),
             _ => None,
         }
     }
@@ -339,7 +340,7 @@ impl Num {
             let m = d.coef.iter().fold(0i64, |a, &c| a * 10 + i64::from(c - b'0'));
             return Num::Int(if d.neg { -m } else { m });
         }
-        Num::Dec(d)
+        Num::Dec(Box::new(d))
     }
 
     pub fn cmp_value(&self, o: &Num) -> Ordering {
@@ -359,8 +360,8 @@ impl Num {
 
     pub fn neg(&self) -> Num {
         match self {
-            Num::Int(i) => i.checked_neg().map_or_else(|| Num::Dec(Dec { neg: false, ..Dec::from_i64(*i) }), Num::Int),
-            Num::Dec(d) => Num::Dec(Dec { neg: !d.neg && !d.coef.is_empty(), ..d.clone() }),
+            Num::Int(i) => i.checked_neg().map_or_else(|| Num::Dec(Box::new(Dec { neg: false, ..Dec::from_i64(*i) })), Num::Int),
+            Num::Dec(d) => Num::Dec(Box::new(Dec { neg: !d.neg && !d.coef.is_empty(), ..(**d).clone() })),
             Num::NaN => Num::NaN,
             Num::Inf { neg } => Num::Inf { neg: !neg },
         }
@@ -369,7 +370,7 @@ impl Num {
     pub fn abs(&self) -> Num {
         match self {
             Num::Int(i) if *i < 0 => self.neg(),
-            Num::Dec(d) => Num::Dec(Dec { neg: false, ..d.clone() }),
+            Num::Dec(d) => Num::Dec(Box::new(Dec { neg: false, ..(**d).clone() })),
             Num::Inf { .. } => Num::Inf { neg: false },
             n => n.clone(),
         }

@@ -10,7 +10,7 @@ use postbor_core::datum::Datum;
 use postbor_core::decimal::Num;
 use core::cmp::Ordering;
 
-use postbor_core::jsonpath::eval::{self, Code, Datetime, DtArg, DtOut, DtType, Host, JItem, PathError, Res};
+use postbor_core::jsonpath::eval::{self, Code, Datetime, DtArg, DtOut, DtType, Host, JItem, PathError, PathFail, Res, Seq};
 use postbor_core::jsonpath::{BinOp, DatetimeMethod, Path};
 use postbor_core::value::Value;
 
@@ -557,12 +557,12 @@ impl Host for PgHost {
 
 fn raise_path(e: PathError) -> ! {
     use PgSqlErrorCode::*;
-    let (code, msg) = match e {
-        PathError::Core(e) => match e.kind {
+    let (code, msg) = match *e.0 {
+        PathFail::Core(e) => match e.kind {
             postbor_core::ErrorKind::InvalidArgument(m) => (ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE, m.to_string()),
             _ => raise(e, Source::Stored),
         },
-        PathError::Sql(code, msg) => (
+        PathFail::Sql(code, msg) => (
             match code {
                 Code::ArrayNotFound => ERRCODE_SQL_JSON_ARRAY_NOT_FOUND,
                 Code::ObjectNotFound => ERRCODE_SQL_JSON_OBJECT_NOT_FOUND,
@@ -583,8 +583,39 @@ fn raise_path(e: PathError) -> ! {
     fail(code, msg)
 }
 
+/// The decoded path of a call site, kept in `fn_extra` while the query runs. Set-returning functions cannot use it
+/// (`fn_extra` holds their call context) and decode once per call.
+struct PathCache {
+    // Declared first, so dropped before the bytes it borrows.
+    path: Option<Path<'static>>,
+    bytes: Box<[u8]>,
+}
+
+/// The decoded path, from the call site's cache when the same path was decoded before.
+fn cached_path<'c>(fcinfo: pg_sys::FunctionCallInfo, arg: JsonPathArg<'_>) -> &'c Path<'c> {
+    // SAFETY: a function call's flinfo is valid for the call; fn_extra is ours for non-set-returning functions and
+    // lives in fn_mcxt, which outlives every call of the query.
+    unsafe {
+        let flinfo = (*fcinfo).flinfo;
+        let mut cache = (*flinfo).fn_extra.cast::<PathCache>();
+        if cache.is_null() {
+            cache = pgrx::PgMemoryContexts::For((*flinfo).fn_mcxt).leak_and_drop_on_delete(PathCache { path: None, bytes: Box::new([]) });
+            (*flinfo).fn_extra = cache.cast();
+        }
+        let cache = &mut *cache;
+        if cache.path.is_none() || *cache.bytes != *arg.0 {
+            cache.path = None;
+            cache.bytes = arg.0.into();
+            // The path borrows `bytes`, which stays unchanged until the path is dropped.
+            let bytes: &'static [u8] = &*core::ptr::slice_from_raw_parts(cache.bytes.as_ptr(), cache.bytes.len());
+            cache.path = Some(Path::decode(bytes).or_raise(Source::Stored));
+        }
+        cache.path.as_ref().unwrap_or_else(|| unreachable!())
+    }
+}
+
 /// Runs a path; `vars` None is the operators' form (no variables, `$x` raises).
-fn run<'a>(path: &'a Path<'a>, doc: &'a Datum<'a>, vars: Option<&'a Datum<'a>>, silent: bool, tz: bool, found: Option<&mut Vec<JItem<'a>>>) -> Res {
+fn run<'a>(path: &'a Path<'a>, doc: &'a Datum<'a>, vars: Option<&'a Datum<'a>>, silent: bool, tz: bool, found: Option<&mut Seq<'a>>) -> Res {
     let res = match found {
         Some(f) => {
             let r = eval::execute(path, Value::root(doc), vars.map(Value::root), !silent, tz, &mut PgHost, Some(&mut *f));
@@ -602,23 +633,21 @@ fn out(it: &JItem) -> CborOut {
     CborOut(buf.into_varlena())
 }
 
-fn exists(target: Cbor<'_>, path: JsonPathArg<'_>, vars: Option<Cbor<'_>>, silent: bool, tz: bool) -> Option<bool> {
-    let p = Path::decode(path.0).or_raise(Source::Stored);
+fn exists(target: Cbor<'_>, p: &Path<'_>, vars: Option<Cbor<'_>>, silent: bool, tz: bool) -> Option<bool> {
     let d = parse_datum(target);
     let v = vars.map(parse_datum);
-    match run(&p, &d, v.as_ref(), silent, tz, None) {
+    match run(p, &d, v.as_ref(), silent, tz, None) {
         Res::Error => None,
         r => Some(r == Res::Ok),
     }
 }
 
-fn matches(target: Cbor<'_>, path: JsonPathArg<'_>, vars: Option<Cbor<'_>>, silent: bool, tz: bool) -> Option<bool> {
-    let p = Path::decode(path.0).or_raise(Source::Stored);
+fn matches(target: Cbor<'_>, p: &Path<'_>, vars: Option<Cbor<'_>>, silent: bool, tz: bool) -> Option<bool> {
     let d = parse_datum(target);
     let v = vars.map(parse_datum);
-    let mut found = Vec::new();
-    run(&p, &d, v.as_ref(), silent, tz, Some(&mut found));
-    if let [one] = found.as_slice()
+    let mut found = Seq::default();
+    run(p, &d, v.as_ref(), silent, tz, Some(&mut found));
+    if let Some(one) = found.single()
         && let Some(b) = eval::bool_or_null(one).unwrap_or_else(|e| raise_path(e))
     {
         return b;
@@ -633,49 +662,47 @@ fn query(target: Cbor<'_>, path: JsonPathArg<'_>, vars: Cbor<'_>, silent: bool, 
     let p = Path::decode(path.0).or_raise(Source::Stored);
     let d = parse_datum(target);
     let v = parse_datum(vars);
-    let mut found = Vec::new();
+    let mut found = Seq::default();
     run(&p, &d, Some(&v), silent, tz, Some(&mut found));
     found.iter().map(out).collect()
 }
 
-fn query_array(target: Cbor<'_>, path: JsonPathArg<'_>, vars: Cbor<'_>, silent: bool, tz: bool) -> CborOut {
-    let p = Path::decode(path.0).or_raise(Source::Stored);
+fn query_array(target: Cbor<'_>, p: &Path<'_>, vars: Cbor<'_>, silent: bool, tz: bool) -> CborOut {
     let d = parse_datum(target);
     let v = parse_datum(vars);
-    let mut found = Vec::new();
-    run(&p, &d, Some(&v), silent, tz, Some(&mut found));
+    let mut found = Seq::default();
+    run(p, &d, Some(&v), silent, tz, Some(&mut found));
     let mut buf = PallocBuf::varlena(32);
     eval::write_array(&found, &mut buf, PgCtx::new().limits().max_depth).or_raise(Source::Stored);
     CborOut(buf.into_varlena())
 }
 
-fn query_first(target: Cbor<'_>, path: JsonPathArg<'_>, vars: Cbor<'_>, silent: bool, tz: bool) -> Option<CborOut> {
-    let p = Path::decode(path.0).or_raise(Source::Stored);
+fn query_first(target: Cbor<'_>, p: &Path<'_>, vars: Cbor<'_>, silent: bool, tz: bool) -> Option<CborOut> {
     let d = parse_datum(target);
     let v = parse_datum(vars);
-    let mut found = Vec::new();
-    run(&p, &d, Some(&v), silent, tz, Some(&mut found));
+    let mut found = Seq::default();
+    run(p, &d, Some(&v), silent, tz, Some(&mut found));
     found.first().map(out)
 }
 
 #[pg_extern(immutable, strict, parallel_safe)]
-fn cbor_path_exists(target: Cbor<'_>, path: JsonPathArg<'_>, vars: default!(Cbor<'_>, "'{}'"), silent: default!(bool, false)) -> Option<bool> {
-    exists(target, path, Some(vars), silent, false)
+fn cbor_path_exists(target: Cbor<'_>, path: JsonPathArg<'_>, vars: default!(Cbor<'_>, "'{}'"), silent: default!(bool, false), fcinfo: pg_sys::FunctionCallInfo) -> Option<bool> {
+    exists(target, cached_path(fcinfo, path), Some(vars), silent, false)
 }
 
 #[pg_extern(stable, strict, parallel_safe)]
-fn cbor_path_exists_tz(target: Cbor<'_>, path: JsonPathArg<'_>, vars: default!(Cbor<'_>, "'{}'"), silent: default!(bool, false)) -> Option<bool> {
-    exists(target, path, Some(vars), silent, true)
+fn cbor_path_exists_tz(target: Cbor<'_>, path: JsonPathArg<'_>, vars: default!(Cbor<'_>, "'{}'"), silent: default!(bool, false), fcinfo: pg_sys::FunctionCallInfo) -> Option<bool> {
+    exists(target, cached_path(fcinfo, path), Some(vars), silent, true)
 }
 
 #[pg_extern(immutable, strict, parallel_safe)]
-fn cbor_path_match(target: Cbor<'_>, path: JsonPathArg<'_>, vars: default!(Cbor<'_>, "'{}'"), silent: default!(bool, false)) -> Option<bool> {
-    matches(target, path, Some(vars), silent, false)
+fn cbor_path_match(target: Cbor<'_>, path: JsonPathArg<'_>, vars: default!(Cbor<'_>, "'{}'"), silent: default!(bool, false), fcinfo: pg_sys::FunctionCallInfo) -> Option<bool> {
+    matches(target, cached_path(fcinfo, path), Some(vars), silent, false)
 }
 
 #[pg_extern(stable, strict, parallel_safe)]
-fn cbor_path_match_tz(target: Cbor<'_>, path: JsonPathArg<'_>, vars: default!(Cbor<'_>, "'{}'"), silent: default!(bool, false)) -> Option<bool> {
-    matches(target, path, Some(vars), silent, true)
+fn cbor_path_match_tz(target: Cbor<'_>, path: JsonPathArg<'_>, vars: default!(Cbor<'_>, "'{}'"), silent: default!(bool, false), fcinfo: pg_sys::FunctionCallInfo) -> Option<bool> {
+    matches(target, cached_path(fcinfo, path), Some(vars), silent, true)
 }
 
 #[pg_extern(immutable, strict, parallel_safe)]
@@ -689,37 +716,37 @@ fn cbor_path_query_tz<'a>(target: Cbor<'a>, path: JsonPathArg<'a>, vars: default
 }
 
 #[pg_extern(immutable, strict, parallel_safe)]
-fn cbor_path_query_array(target: Cbor<'_>, path: JsonPathArg<'_>, vars: default!(Cbor<'_>, "'{}'"), silent: default!(bool, false)) -> CborOut {
-    query_array(target, path, vars, silent, false)
+fn cbor_path_query_array(target: Cbor<'_>, path: JsonPathArg<'_>, vars: default!(Cbor<'_>, "'{}'"), silent: default!(bool, false), fcinfo: pg_sys::FunctionCallInfo) -> CborOut {
+    query_array(target, cached_path(fcinfo, path), vars, silent, false)
 }
 
 #[pg_extern(stable, strict, parallel_safe)]
-fn cbor_path_query_array_tz(target: Cbor<'_>, path: JsonPathArg<'_>, vars: default!(Cbor<'_>, "'{}'"), silent: default!(bool, false)) -> CborOut {
-    query_array(target, path, vars, silent, true)
+fn cbor_path_query_array_tz(target: Cbor<'_>, path: JsonPathArg<'_>, vars: default!(Cbor<'_>, "'{}'"), silent: default!(bool, false), fcinfo: pg_sys::FunctionCallInfo) -> CborOut {
+    query_array(target, cached_path(fcinfo, path), vars, silent, true)
 }
 
 #[pg_extern(immutable, strict, parallel_safe)]
-fn cbor_path_query_first(target: Cbor<'_>, path: JsonPathArg<'_>, vars: default!(Cbor<'_>, "'{}'"), silent: default!(bool, false)) -> Option<CborOut> {
-    query_first(target, path, vars, silent, false)
+fn cbor_path_query_first(target: Cbor<'_>, path: JsonPathArg<'_>, vars: default!(Cbor<'_>, "'{}'"), silent: default!(bool, false), fcinfo: pg_sys::FunctionCallInfo) -> Option<CborOut> {
+    query_first(target, cached_path(fcinfo, path), vars, silent, false)
 }
 
 #[pg_extern(stable, strict, parallel_safe)]
-fn cbor_path_query_first_tz(target: Cbor<'_>, path: JsonPathArg<'_>, vars: default!(Cbor<'_>, "'{}'"), silent: default!(bool, false)) -> Option<CborOut> {
-    query_first(target, path, vars, silent, true)
+fn cbor_path_query_first_tz(target: Cbor<'_>, path: JsonPathArg<'_>, vars: default!(Cbor<'_>, "'{}'"), silent: default!(bool, false), fcinfo: pg_sys::FunctionCallInfo) -> Option<CborOut> {
+    query_first(target, cached_path(fcinfo, path), vars, silent, true)
 }
 
 #[pg_operator(immutable, strict, parallel_safe)]
 #[opname(@?)]
 #[restrict(contsel)]
 #[join(contjoinsel)]
-fn cbor_path_exists_opr(target: Cbor<'_>, path: JsonPathArg<'_>) -> Option<bool> {
-    exists(target, path, None, true, false)
+fn cbor_path_exists_opr(target: Cbor<'_>, path: JsonPathArg<'_>, fcinfo: pg_sys::FunctionCallInfo) -> Option<bool> {
+    exists(target, cached_path(fcinfo, path), None, true, false)
 }
 
 #[pg_operator(immutable, strict, parallel_safe)]
 #[opname(@@)]
 #[restrict(contsel)]
 #[join(contjoinsel)]
-fn cbor_path_match_opr(target: Cbor<'_>, path: JsonPathArg<'_>) -> Option<bool> {
-    matches(target, path, None, true, false)
+fn cbor_path_match_opr(target: Cbor<'_>, path: JsonPathArg<'_>, fcinfo: pg_sys::FunctionCallInfo) -> Option<bool> {
+    matches(target, cached_path(fcinfo, path), None, true, false)
 }
