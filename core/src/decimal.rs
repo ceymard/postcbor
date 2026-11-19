@@ -80,7 +80,7 @@ impl Dec {
             if g >= 10000 {
                 return Err(bad("malformed numeric"));
             }
-            digits.extend_from_slice(format!("{g:04}").as_bytes());
+            digits.extend_from_slice(&[b'0' + (g / 1000) as u8, b'0' + (g / 100 % 10) as u8, b'0' + (g / 10 % 10) as u8, b'0' + (g % 10) as u8]);
             ngroups += 1;
         }
         let exp10 = (i64::from(weight) - ngroups + 1) * GROUP as i64;
@@ -295,13 +295,26 @@ impl Dec {
 
 /// A jsonpath number: PostgreSQL's `numeric`, with machine integers kept apart so the common comparisons need no
 /// allocation. NaN equals itself and sorts above everything, as in `numeric`.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub enum Num {
     Int(i64),
     /// Boxed: values that need it are rare, and path items stay small.
     Dec(Box<Dec>),
     NaN,
     Inf { neg: bool },
+}
+
+impl Clone for Num {
+    /// Inline for the common variants; only boxed decimals call out.
+    #[inline]
+    fn clone(&self) -> Num {
+        match self {
+            Num::Int(i) => Num::Int(*i),
+            Num::Dec(d) => Num::Dec(d.clone()),
+            Num::NaN => Num::NaN,
+            Num::Inf { neg } => Num::Inf { neg: *neg },
+        }
+    }
 }
 
 impl Num {

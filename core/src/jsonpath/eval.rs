@@ -9,7 +9,7 @@ use std::rc::Rc;
 
 use super::{BinOp, DatetimeMethod, ItemId, Kind, Method, Path, UnOp};
 use crate::ctx::Ticker;
-use crate::cursor::{MAJOR_ARRAY, MAJOR_MAP, MAJOR_NEGATIVE, MAJOR_TAG, MAJOR_TEXT, MAJOR_UNSIGNED};
+use crate::cursor::{MAJOR_ARRAY, MAJOR_BYTES, MAJOR_MAP, MAJOR_NEGATIVE, MAJOR_SIMPLE, MAJOR_TAG, MAJOR_TEXT, MAJOR_UNSIGNED};
 use crate::datum;
 use crate::encode::write_head;
 use crate::decimal::Num;
@@ -145,7 +145,7 @@ pub struct KeyValue<'a> {
 }
 
 /// An SQL/JSON item: a value inside the document or `vars`, or one computed by the path.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub enum JItem<'a> {
     Doc(Value<'a>),
     Null,
@@ -160,6 +160,37 @@ pub enum JItem<'a> {
 }
 
 const _: () = assert!(core::mem::size_of::<JItem>() <= 24, "path items are moved often: keep them small");
+
+impl Clone for JItem<'_> {
+    /// Inline for the common variants; boxed ones call out.
+    #[inline]
+    fn clone(&self) -> Self {
+        match self {
+            JItem::Doc(v) => JItem::Doc(*v),
+            JItem::Null => JItem::Null,
+            JItem::Bool(b) => JItem::Bool(*b),
+            JItem::Num(n) => JItem::Num(n.clone()),
+            JItem::Str(s) => JItem::Str(s),
+            other => other.clone_boxed(),
+        }
+    }
+}
+
+impl JItem<'_> {
+    #[inline(never)]
+    fn clone_boxed(&self) -> Self {
+        match self {
+            JItem::OwnedStr(s) => JItem::OwnedStr(s.clone()),
+            JItem::KeyValue(kv) => JItem::KeyValue(kv.clone()),
+            JItem::Datetime(d) => JItem::Datetime(d.clone()),
+            JItem::Doc(v) => JItem::Doc(*v),
+            JItem::Null => JItem::Null,
+            JItem::Bool(b) => JItem::Bool(*b),
+            JItem::Num(n) => JItem::Num(n.clone()),
+            JItem::Str(s) => JItem::Str(s),
+        }
+    }
+}
 
 /// Item types, as jsonpath tells them apart. Byte strings, `undefined` and other simple values are CBOR's own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -177,7 +208,7 @@ enum Ty {
 }
 
 /// Tags the path sees through: all but numbers (2–5) and datetimes (0, 1).
-#[inline]
+#[inline(always)]
 fn peel(v: Value) -> R<Value> {
     let mut v = v;
     loop {
@@ -190,11 +221,13 @@ fn peel(v: Value) -> R<Value> {
 }
 
 /// Whether a tag gives its content a type: tags 2 and 3 always (normalization checks their content); 4 and 5 when
-/// they hold `[integer, integer or bignum]`; 0 around text and 1 around a number.
+/// they hold `[integer, integer or bignum]`; 0 around RFC 3339 text and 1 around a number of seconds that
+/// `timestamptz` can hold.
+#[inline(never)]
 fn typed_tag(v: Value, t: u64) -> R<bool> {
     Ok(match t {
-        0 => matches!(v.tag_content()?.kind()?, VKind::Text(_)),
-        1 => matches!(v.tag_content()?.kind()?, VKind::Unsigned(_) | VKind::Negative(_) | VKind::Float(_)),
+        0 => v.tag_content()?.text_bytes()?.and_then(|t| core::str::from_utf8(t).ok()).and_then(rfc3339_offset).is_some(),
+        1 => epoch_seconds(v.tag_content()?)?.is_some(),
         2 | 3 => true,
         4 | 5 => {
             let c = v.tag_content()?;
@@ -215,6 +248,7 @@ fn typed_tag(v: Value, t: u64) -> R<bool> {
     })
 }
 
+#[inline]
 fn ty(it: &JItem) -> R<Ty> {
     Ok(match it {
         JItem::Null => Ty::Null,
@@ -224,18 +258,23 @@ fn ty(it: &JItem) -> R<Ty> {
         JItem::KeyValue(_) => Ty::Object,
         JItem::Datetime(_) => Ty::Datetime,
         JItem::Doc(v) => {
-            let v = peel(*v)?;
-            match v.kind()? {
-                VKind::Tag(0 | 1) => Ty::Datetime,
-                VKind::Unsigned(_) | VKind::Negative(_) | VKind::Float(_) | VKind::Tag(_) => Ty::Num,
-                VKind::Bytes(_) => Ty::Bytes,
-                VKind::Text(_) => Ty::Str,
-                VKind::Array(_) => Ty::Array,
-                VKind::Map(_) => Ty::Object,
-                VKind::False | VKind::True => Ty::Bool,
-                VKind::Null => Ty::Null,
-                VKind::Undefined => Ty::Undefined,
-                VKind::Simple(_) => Ty::Simple,
+            // From the head alone: `kind` would also check the UTF-8 of text.
+            let (h, _) = peel(*v)?.head()?;
+            match h.major {
+                MAJOR_UNSIGNED | MAJOR_NEGATIVE => Ty::Num,
+                MAJOR_BYTES => Ty::Bytes,
+                MAJOR_TEXT => Ty::Str,
+                MAJOR_ARRAY => Ty::Array,
+                MAJOR_MAP => Ty::Object,
+                MAJOR_TAG if h.arg <= 1 => Ty::Datetime,
+                MAJOR_TAG => Ty::Num,
+                _ => match h.info {
+                    20 | 21 => Ty::Bool,
+                    22 => Ty::Null,
+                    23 => Ty::Undefined,
+                    25..=27 => Ty::Num,
+                    _ => Ty::Simple,
+                },
             }
         }
     })
@@ -245,6 +284,7 @@ fn ty(it: &JItem) -> R<Ty> {
 enum Sv<'i> {
     Null,
     Bool(bool),
+    NumRef(&'i Num),
     Num(Num),
     Str(&'i [u8]),
     Bytes(&'i [u8]),
@@ -259,7 +299,7 @@ impl Sv<'_> {
         match self {
             Sv::Null => Ty::Null,
             Sv::Bool(_) => Ty::Bool,
-            Sv::Num(_) => Ty::Num,
+            Sv::Num(_) | Sv::NumRef(_) => Ty::Num,
             Sv::Str(_) => Ty::Str,
             Sv::Bytes(_) => Ty::Bytes,
             Sv::Undefined => Ty::Undefined,
@@ -270,17 +310,21 @@ impl Sv<'_> {
     }
 }
 
+#[inline(always)]
 fn scalar<'i>(it: &'i JItem) -> R<Sv<'i>> {
     let v = match it {
         JItem::Null => return Ok(Sv::Null),
         JItem::Bool(b) => return Ok(Sv::Bool(*b)),
-        JItem::Num(n) => return Ok(Sv::Num(n.clone())),
+        JItem::Num(n) => return Ok(Sv::NumRef(n)),
         JItem::Str(s) => return Ok(Sv::Str(s)),
         JItem::OwnedStr(s) => return Ok(Sv::Str(s)),
         JItem::KeyValue(_) => return Ok(Sv::Container(Ty::Object)),
         JItem::Datetime(_) => return Ok(Sv::Datetime),
         JItem::Doc(v) => peel(*v)?,
     };
+    if let Some(t) = v.text_bytes()? {
+        return Ok(Sv::Str(t));
+    }
     Ok(match v.kind()? {
         VKind::Unsigned(n) if n <= i64::MAX as u64 => Sv::Num(Num::Int(n as i64)),
         VKind::Negative(n) if n < i64::MAX as u64 => Sv::Num(Num::Int(-1 - n as i64)),
@@ -331,7 +375,22 @@ fn ty_name(t: Ty) -> &'static str {
     }
 }
 
-/// The number an item holds, if it is one.
+/// timestamptz's range: 4714-11-24 BC to 294276 AD, in seconds since 1970.
+const EPOCH_RANGE: core::ops::Range<f64> = -210_866_803_200.0..9_224_318_016_000.0;
+
+/// The seconds of a tag 1 datetime, if its content is a number within `timestamptz`'s range.
+fn epoch_seconds(v: Value) -> R<Option<f64>> {
+    let secs = match v.kind()? {
+        VKind::Unsigned(n) => n as f64,
+        VKind::Negative(n) => -1.0 - n as f64,
+        VKind::Float(f) => f,
+        _ => return Ok(None),
+    };
+    Ok(EPOCH_RANGE.contains(&secs).then_some(secs))
+}
+
+/// The number an item holds, if it is one. Numbers without a `numeric` value (a decimal fraction beyond its range)
+/// give None, which comparisons treat as unknown.
 fn num_of(it: &JItem) -> R<Option<Num>> {
     let v = match it {
         JItem::Num(n) => return Ok(Some(n.clone())),
@@ -343,33 +402,34 @@ fn num_of(it: &JItem) -> R<Option<Num>> {
         VKind::Negative(n) if n < i64::MAX as u64 => Some(Num::Int(-1 - n as i64)),
         VKind::Float(f) if f.is_nan() => Some(Num::NaN),
         VKind::Float(f) if f.is_infinite() => Some(Num::Inf { neg: f < 0.0 }),
-        VKind::Negative(_) | VKind::Float(_) | VKind::Tag(_) => match num::to_decimal(&v)? {
-            Some(t) => Some(Num::parse(&t)?),
-            None => None,
+        VKind::Negative(_) | VKind::Float(_) | VKind::Tag(_) => match num::to_decimal(&v) {
+            Ok(Some(t)) => Num::parse(&t).ok(),
+            Ok(None) => None,
+            Err(e) if e.kind == crate::error::ErrorKind::CorruptDatum => return Err(e.into()),
+            Err(_) => None,
         },
         _ => None,
     })
 }
 
 /// The text an item holds, if it is a string.
+#[inline]
 fn str_of<'i>(it: &'i JItem) -> R<Option<&'i [u8]>> {
     Ok(match it {
         JItem::Str(s) => Some(s),
         JItem::OwnedStr(s) => Some(s),
-        JItem::Doc(v) => match peel(*v)?.kind()? {
-            VKind::Text(t) => Some(t.as_bytes()),
-            _ => None,
-        },
+        JItem::Doc(v) => peel(*v)?.text_bytes()?,
         _ => None,
     })
 }
 
+#[inline]
 fn bool_of(it: &JItem) -> R<Option<bool>> {
     Ok(match it {
         JItem::Bool(b) => Some(*b),
-        JItem::Doc(v) => match peel(*v)?.kind()? {
-            VKind::True => Some(true),
-            VKind::False => Some(false),
+        JItem::Doc(v) => match peel(*v)?.head()?.0 {
+            h if h.major == MAJOR_SIMPLE && h.info == 21 => Some(true),
+            h if h.major == MAJOR_SIMPLE && h.info == 20 => Some(false),
             _ => None,
         },
         _ => None,
@@ -377,18 +437,19 @@ fn bool_of(it: &JItem) -> R<Option<bool>> {
 }
 
 /// The document container behind an item, tags peeled.
+#[inline(always)]
 fn doc_container<'a>(it: &JItem<'a>) -> R<Option<Value<'a>>> {
     Ok(match it {
         JItem::Doc(v) => {
             let v = peel(*v)?;
-            matches!(v.kind()?, VKind::Array(_) | VKind::Map(_)).then_some(v)
+            matches!(v.head()?.0.major, MAJOR_ARRAY | MAJOR_MAP).then_some(v)
         }
         _ => None,
     })
 }
 
 /// `JsonbArraySize`: the length of an array item, or None.
-#[inline]
+#[inline(always)]
 fn array_size(it: &JItem) -> R<Option<u64>> {
     Ok(match it {
         JItem::Doc(v) => {
@@ -474,6 +535,7 @@ pub struct Seq<'a> {
 }
 
 impl<'a> Seq<'a> {
+    #[inline]
     pub fn push(&mut self, it: JItem<'a>) {
         if self.first.is_none() {
             self.first = Some(it);
@@ -495,10 +557,12 @@ impl<'a> Seq<'a> {
     }
 
     /// The only item, if there is exactly one.
+    #[inline]
     pub fn single(&self) -> Option<&JItem<'a>> {
         if self.rest.is_empty() { self.first.as_ref() } else { None }
     }
 
+    #[inline]
     pub fn iter(&self) -> impl Iterator<Item = &JItem<'a>> {
         self.first.iter().chain(self.rest.iter())
     }
@@ -578,6 +642,8 @@ struct Exec<'a, 'h, H: Host> {
     host: &'h mut H,
     vars: Option<Value<'a>>,
     root: JItem<'a>,
+    /// The root's container, the base object `$` sets.
+    root_anchor: Option<Value<'a>>,
     current: JItem<'a>,
     base: Base<'a>,
     last_generated_id: i32,
@@ -610,13 +676,13 @@ pub fn execute<'a, H: Host>(path: &'a Path<'a>, doc: Value<'a>, vars: Option<Val
         }
         None => None,
     };
-    let root = JItem::Doc(doc);
     let mut cx = Exec {
         path,
         host,
         vars,
-        current: root.clone(),
-        root,
+        current: JItem::Doc(doc),
+        root: JItem::Doc(doc),
+        root_anchor: doc_container(&JItem::Doc(doc))?,
         base: Base { anchor: None, extra: 0, id: 0 },
         last_generated_id: 1 + i32::from(vars.is_some()),
         innermost_array_size: -1,
@@ -627,7 +693,7 @@ pub fn execute<'a, H: Host>(path: &'a Path<'a>, doc: Value<'a>, vars: Option<Val
         ticker: Ticker::default(),
         calls: 0,
     };
-    let root = cx.root.clone();
+    let root = JItem::Doc(doc);
     if !cx.lax && found.is_none() {
         // Strict mode must see every result to know there is no error.
         let mut vals = Seq::default();
@@ -662,16 +728,18 @@ impl<'a, H: Host> Exec<'a, '_, H> {
         }
     }
 
+    /// Every recursive call: the stack check, and the interrupt check (through the ticker) at a sixteenth of the rate.
+    #[inline(always)]
     fn enter(&mut self) {
         self.calls = self.calls.wrapping_add(1);
         if self.calls.is_multiple_of(STACK_CHECK_EVERY) {
             self.host.check_stack();
+            self.ticker.tick();
         }
     }
 
     fn exec_opt_unwrap_target(&mut self, id: ItemId, jb: &JItem<'a>, mut found: Found<'_, 'a>, unwrap: bool) -> R<Res> {
         self.enter();
-        self.ticker.tick();
         let item = self.path.item(id);
         let next = item.next;
         match &item.kind {
@@ -754,7 +822,7 @@ impl<'a, H: Host> Exec<'a, '_, H> {
             Kind::Root => {
                 let root = self.root.clone();
                 let saved = self.base;
-                self.base = Base { anchor: doc_container(&root)?, extra: 0, id: 0 };
+                self.base = Base { anchor: self.root_anchor, extra: 0, id: 0 };
                 let res = self.next_item(next, root, found);
                 self.base = saved;
                 res
@@ -1066,14 +1134,24 @@ impl<'a, H: Host> Exec<'a, '_, H> {
     /// every pair, so that an error anywhere makes the result unknown.
     fn predicate(&mut self, larg: ItemId, rarg: Option<ItemId>, jb: &JItem<'a>, unwrap_right: bool, pred: Pred) -> R<Tri> {
         let mut lseq = Seq::default();
-        if self.exec_opt_unwrap_result_no_throw(larg, jb, true, &mut lseq)? == Res::Error {
-            return Ok(Tri::Unknown);
+        match self.literal(larg) {
+            Some(v) => lseq.push(v),
+            None => {
+                if self.exec_opt_unwrap_result_no_throw(larg, jb, true, &mut lseq)? == Res::Error {
+                    return Ok(Tri::Unknown);
+                }
+            }
         }
         let mut rseq = Seq::default();
-        if let Some(r) = rarg
-            && self.exec_opt_unwrap_result_no_throw(r, jb, unwrap_right, &mut rseq)? == Res::Error
-        {
-            return Ok(Tri::Unknown);
+        if let Some(r) = rarg {
+            match self.literal(r) {
+                Some(v) => rseq.push(v),
+                None => {
+                    if self.exec_opt_unwrap_result_no_throw(r, jb, unwrap_right, &mut rseq)? == Res::Error {
+                        return Ok(Tri::Unknown);
+                    }
+                }
+            }
         }
         let (mut error, mut found) = (false, false);
         for l in lseq.iter() {
@@ -1099,6 +1177,22 @@ impl<'a, H: Host> Exec<'a, '_, H> {
             Tri::Unknown
         } else {
             Tri::False
+        })
+    }
+
+    /// A literal operand, which evaluates to itself without error (a shortcut, not a semantic difference).
+    #[inline]
+    fn literal(&self, id: ItemId) -> Option<JItem<'a>> {
+        let item = self.path.item(id);
+        if item.next.is_some() {
+            return None;
+        }
+        Some(match &item.kind {
+            Kind::Null => JItem::Null,
+            Kind::Bool(b) => JItem::Bool(*b),
+            Kind::Numeric(n) => JItem::Num(n.clone()),
+            Kind::String(s) => JItem::Str(s),
+            _ => return None,
         })
     }
 
@@ -1179,6 +1273,7 @@ impl<'a, H: Host> Exec<'a, '_, H> {
     }
 
     /// `.key` on an object: text keys only.
+    #[inline(always)]
     fn member(&self, jb: &JItem<'a>, k: &[u8]) -> R<Option<JItem<'a>>> {
         if let JItem::KeyValue(kv) = jb {
             return Ok(match k {
@@ -1195,6 +1290,7 @@ impl<'a, H: Host> Exec<'a, '_, H> {
     }
 
     /// Literal or variable value (`getJsonPathItem`); a variable becomes the base object for `.keyvalue()` ids.
+    #[inline]
     fn get_item(&mut self, id: ItemId) -> R<JItem<'a>> {
         Ok(match &self.path.item(id).kind {
             Kind::Null => JItem::Null,
@@ -1305,12 +1401,15 @@ impl<'a, H: Host> Exec<'a, '_, H> {
             }
             return Ok(Tri::Unknown);
         }
-        let cmp = match (sa, sb) {
-            (Sv::Bool(x), Sv::Bool(y)) => x.cmp(&y),
-            (Sv::Num(x), Sv::Num(y)) => x.cmp_value(&y),
+        let cmp = match (&sa, &sb) {
+            (Sv::Bool(x), Sv::Bool(y)) => x.cmp(y),
+            (Sv::NumRef(x), Sv::NumRef(y)) => x.cmp_value(y),
+            (Sv::Num(x), Sv::NumRef(y)) => x.cmp_value(y),
+            (Sv::NumRef(x), Sv::Num(y)) => x.cmp_value(y),
+            (Sv::Num(x), Sv::Num(y)) => x.cmp_value(y),
             // Strings compare by code point, which for UTF-8 is byte order; so do byte strings.
             (Sv::Str(x), Sv::Str(y)) | (Sv::Bytes(x), Sv::Bytes(y)) => x.cmp(y),
-            (Sv::Simple(x), Sv::Simple(y)) => x.cmp(&y),
+            (Sv::Simple(x), Sv::Simple(y)) => x.cmp(y),
             (Sv::Datetime, Sv::Datetime) => match (self.datetime_of(a)?, self.datetime_of(b)?) {
                 (Some(x), Some(y)) => match self.host.datetime_cmp(&x, &y, self.use_tz) {
                     Some(o) => o,
@@ -1348,15 +1447,7 @@ impl<'a, H: Host> Exec<'a, '_, H> {
                 let Some(tz) = rfc3339_offset(t) else { return Ok(None) };
                 self.host.timestamptz_in(t).map(|value| at(value, tz))
             }
-            VKind::Tag(1) => {
-                let secs = match num_of(&JItem::Doc(v.tag_content()?))? {
-                    Some(Num::Int(i)) => i as f64,
-                    Some(n) => n.to_text().parse::<f64>().unwrap_or(f64::NAN),
-                    None => return Ok(None),
-                };
-                // timestamptz's range: 4714-11-24 BC to 294276 AD.
-                (-210_866_803_200.0..9_224_318_016_000.0).contains(&secs).then(|| at(self.host.epoch_timestamptz(secs), 0))
-            }
+            VKind::Tag(1) => epoch_seconds(v.tag_content()?)?.map(|secs| at(self.host.epoch_timestamptz(secs), 0)),
             _ => None,
         })
     }
@@ -1507,9 +1598,9 @@ impl<'a, H: Host> Exec<'a, '_, H> {
             Method::String => {
                 if text.is_some() {
                     match jb {
-                        JItem::Doc(v) => match peel(*v)?.kind()? {
-                            VKind::Text(t) => JItem::Str(t.as_bytes()),
-                            _ => jb.clone(),
+                        JItem::Doc(v) => match peel(*v)?.text_bytes()? {
+                            Some(t) => JItem::Str(t),
+                            None => jb.clone(),
                         },
                         _ => jb.clone(),
                     }
@@ -1545,6 +1636,19 @@ fn rfc3339_offset(t: &str) -> Option<i32> {
     if !(digits(0..4) && at(4, b"-") && digits(5..7) && at(7, b"-") && digits(8..10) && at(10, b"Tt ") && digits(11..13) && at(13, b":") && digits(14..16) && at(16, b":") && digits(17..19)) {
         return None;
     }
+    let num = |r: core::ops::Range<usize>| b.get(r).map_or(0, |d| d.iter().fold(0u32, |a, &c| a * 10 + u32::from(c - b'0')));
+    let (year, month, day) = (num(0..4), num(5..7), num(8..10));
+    let leap = year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400));
+    let days = match month {
+        2 if leap => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    };
+    // PostgreSQL has no year 0 and accepts a leap second.
+    if year == 0 || !(1..=12).contains(&month) || !(1..=days).contains(&day) || num(11..13) > 23 || num(14..16) > 59 || num(17..19) > 60 {
+        return None;
+    }
     let mut i = 19;
     if at(i, b".") {
         i += 1;
@@ -1560,6 +1664,9 @@ fn rfc3339_offset(t: &str) -> Option<i32> {
         b"Z" | b"z" => Some(0),
         [sign @ (b'+' | b'-'), h1, h2, b':', m1, m2] if [h1, h2, m1, m2].iter().all(|d| d.is_ascii_digit()) => {
             let n = |a: &u8, b: &u8| i32::from(a - b'0') * 10 + i32::from(b - b'0');
+            if n(h1, h2) > 15 || n(m1, m2) > 59 {
+                return None;
+            }
             let east = n(h1, h2) * 3600 + n(m1, m2) * 60;
             Some(if *sign == b'+' { -east } else { east })
         }
@@ -1887,7 +1994,8 @@ mod tests {
         assert_eq!(rfc3339_offset("2013-03-21T20:04:00Z"), Some(0));
         assert_eq!(rfc3339_offset("2013-03-21T20:04:00.5+01:30"), Some(-5400));
         assert_eq!(rfc3339_offset("2013-03-21 20:04:00-05:00"), Some(18000));
-        for bad in ["2013-03-21T20:04:00", "2013-03-21T20:04:00.Z", "2013-3-21T20:04:00Z", "2013-03-21T20:04:00+0100", "x"] {
+        assert_eq!(rfc3339_offset("2012-02-29T23:59:60Z"), Some(0));
+        for bad in ["2013-03-21T20:04:00", "2013-03-21T20:04:00.Z", "2013-3-21T20:04:00Z", "2013-03-21T20:04:00+0100", "x", "2013-02-29T00:00:00Z", "2013-04-31T00:00:00Z", "0000-01-01T00:00:00Z", "2013-01-01T24:00:00Z", "2013-01-01T00:00:00+16:00"] {
             assert_eq!(rfc3339_offset(bad), None, "{bad}");
         }
     }

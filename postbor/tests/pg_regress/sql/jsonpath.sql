@@ -13,6 +13,11 @@ RESET postbor.max_depth;
 -- Numbers compare by value across CBOR's number forms; NaN sorts above everything.
 SELECT cbor_path_query('[1, 1.0, 4([-1, 10]), 2(h''01''), 5([1, 3]), 6, NaN, Infinity]', '$[*] ? (@ == 1 || @ > 5.5)');
 SELECT cbor_path_query('[18446744073709551616, -18446744073709551617]', '$[*] ? (@ > 18446744073709551615 || @ < -18446744073709551616)');
+-- Bigfloats with negative exponents are exact decimals; numbers without a numeric value compare as unknown.
+SELECT cbor '[5([-1, 3])]' @? '$[*] ? (@ == 1.5)', cbor_path_query('5([-3, -3])', '$ + 0');
+SELECT cbor_path_query('[4([100000000, 1]), 5([-20000, 1]), 2]', '$[*] ? (@ > 1)');
+SELECT cbor_path_query('[4([100000000, 1])]', '$[*] ? ((@ > 1) is unknown)');
+SELECT cbor_path_query('4([100000000, 1])', '$ + 1', silent => true);
 -- Arithmetic is decimal: whole results are integers, others decimal fractions with numeric's scale.
 SELECT cbor_path_query('{"a": 2}', '$.a * 2.5');
 SELECT cbor_path_query('{"a": 2}', '$.a * 3');
@@ -26,6 +31,13 @@ SELECT cbor_path_query('4([-2, 150])', '$ + 0');
 SELECT cbor_path_query('42({"a": 32("http://x")})', '$.a');
 SELECT cbor_path_query('42({"a": 32("http://x")})', '$.a ? (@ starts with "http")');
 SELECT cbor_path_query('42({"a": 1})', '$.type()');
+
+-- Tags 0 and 1 are timestamptz values when their content is one; otherwise transparent.
+SELECT cbor_path_query('[0("2013-03-21T20:04:00Z"), 0("2013-03-21T22:04:00+02:00"), 1(1363896240), 1(1363896240.5)]', '$[*].type()');
+SELECT cbor_path_query_tz('[0("2013-03-21T20:04:00Z"), 0("2013-03-21T22:04:00+02:00"), 1(1363896240), 1(1363896240.5)]', '$[*] ? (@ == "2013-03-21 20:04:00+00".datetime())');
+SELECT cbor_path_query('[0("x"), 0("2013-02-30T00:00:00Z"), 1(1e300), 1("s")]', '$[*].type()');
+SELECT cbor_path_query('[0("x"), 0("2013-02-30T00:00:00Z")]', '$[*] ? (@ starts with "2013")');
+SELECT cbor_path_query('0("2013-03-21T20:04:00Z")', '$.datetime()');
 
 -- Types jsonpath lacks.
 SELECT cbor_path_query('[h''01'', undefined, simple(99), null]', '$[*].type()');

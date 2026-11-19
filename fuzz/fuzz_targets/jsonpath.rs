@@ -8,10 +8,11 @@ use postbor_core::jsonpath::eval::{PlainHost, Seq, execute, write_array};
 use postbor_core::jsonpath::{Path, print};
 use postbor_core::value::Value;
 
-const DOCS: [&str; 3] = [
+const DOCS: [&str; 4] = [
     r#"{"a": [1, 2.5, "x", {"b": null}], "c": 42(h'01'), 3: [true, undefined]}"#,
     r#"[[1, [2, 4([-2, 150])]], {"a": {"a": 1}}, 18446744073709551616]"#,
     r#""2020-01-01""#,
+    r#"[5([-1, 3]), 4([100000000, 1]), 0("2013-03-21T20:04:00Z"), 0("x"), 1(1.5), 1(1e300), NaN]"#,
 ];
 
 fuzz_target!(|data: &[u8]| {

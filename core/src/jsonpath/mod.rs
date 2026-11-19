@@ -142,9 +142,15 @@ impl<'a> Path<'a> {
         }
         let data = payload.get(4..).ok_or_else(malformed)?;
         let mut items: Vec<Option<Item<'a>>> = vec![None];
-        // PostgreSQL writes a tree: an item referenced twice would escape the nesting cap.
-        let mut seen: std::collections::HashSet<usize> = std::collections::HashSet::new();
-        seen.insert(0);
+        // PostgreSQL writes a tree: an item referenced twice would escape the nesting cap. One bit per offset.
+        let mut seen = vec![0u64; data.len() / 64 + 1];
+        let mut mark = |off: usize| -> bool {
+            let (w, b) = (off / 64, 1u64 << (off % 64));
+            let fresh = seen[w] & b == 0;
+            seen[w] |= b;
+            fresh
+        };
+        mark(0);
         let mut todo = vec![Todo { offset: 0, id: 0, depth: 1 }];
         while let Some(t) = todo.pop() {
             let mut c = Cursor::at(data, t.offset);
@@ -160,7 +166,7 @@ impl<'a> Path<'a> {
                 if t.depth >= MAX_NESTING {
                     return Err(bad("jsonpath nests deeper than 256 items"));
                 }
-                if !seen.insert(off) {
+                if !mark(off) {
                     return Err(malformed());
                 }
                 let id = items.len();

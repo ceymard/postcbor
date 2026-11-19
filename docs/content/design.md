@@ -62,7 +62,7 @@ Interpreted tags:
 | 1 | epoch date-time (number) | cast to `timestamptz`, `to_cbor(timestamptz)` |
 | 2, 3 | bignum | normalization, comparison, `numeric` casts |
 | 4 | decimal fraction | `numeric` casts |
-| 5 | bigfloat | `numeric` casts (exact only when the exponent is ≥ 0) |
+| 5 | bigfloat | `numeric` casts (exact: m × 2⁻ⁿ has n decimal places, up to `numeric`'s 16383) |
 | 37 | UUID (16-byte string) | `uuid` casts |
 | 52, 54 | IPv4 / IPv6 address or prefix | EDN `IP''` literal |
 | 100 | days since epoch (RFC 8943) | `date` casts, `to_cbor(date)` |
@@ -279,11 +279,11 @@ Queries:
 
 `@?`, `@@` and `cbor_path_exists`, `cbor_path_match`, `cbor_path_query` (set-returning), `cbor_path_query_array`, `cbor_path_query_first`, each with `vars cbor` (a map) and `silent bool`, plus the `_tz` variants. The path argument is PostgreSQL's `jsonpath` ([ADR-0008](../adr/0008-path-queries-reuse-jsonpath.md)). Results must equal jsonb's for every value that converts to jsonb without loss: the reference is `jsonb_path_*(value::jsonb, …)`.
 
-- **Compiled path**: the `jsonpath` value's binary form is decoded in the core (format version 1, stable since PG 12; PG 17 appended the `.bigint()` … `.timestamp_tz()` items). Unknown versions and items are refused, and so are paths nesting deeper than 256 items (arguments and chained steps both count). The decoded path is cached per call site.
-- **Numbers**: inside path expressions, numbers compare by value, as in SQL/JSON: `1 == 1.0`, and bignums, decimal fractions and bigfloats are numbers. A float takes the value of its shortest decimal form, as when it is converted to jsonb. Containment and `=` stay typed.
+- **Compiled path**: the `jsonpath` value's binary form is decoded in the core (format version 1, stable since PG 12; PG 17 appended the `.bigint()` … `.timestamp_tz()` items). Unknown versions and items are refused, and so are paths nesting deeper than 256 items (arguments and chained steps both count). The scalar functions and the operators keep the decoded path per call site; `cbor_path_query`, whose call site holds its set-returning state, decodes once per call.
+- **Numbers**: inside path expressions, numbers compare by value, as in SQL/JSON: `1 == 1.0`, and bignums, decimal fractions and bigfloats are numbers. A float takes the value of its shortest decimal form, as when it is converted to jsonb. A number without a `numeric` value (a decimal fraction beyond `numeric`'s range, a bigfloat with more than 16383 binary places) compares as unknown and is not a number for arithmetic. Containment and `=` stay typed.
 - **CBOR types jsonpath lacks**:
   - Byte strings: `.type()` is `"bytes"`; two byte strings compare by their bytes, and comparing them with other types is unknown, as jsonpath does for mismatched types.
-  - Tags 2 and 3 are numbers, and tags 4 and 5 when their content is `[integer, integer or bignum]`; tags 0 and 1 are datetimes; other tags are transparent (the path sees their content, and a result taken from the document keeps its tag).
+  - Tags 2 and 3 are numbers, and tags 4 and 5 when their content is `[integer, integer or bignum]`; tags 0 and 1 are datetimes when their content is one (below); other tags are transparent (the path sees their content, and a result taken from the document keeps its tag).
   - Map keys that are not text: `.key` matches only text keys; `.*` and `.keyvalue()` visit every entry, and `.keyvalue()` gives the key as its CBOR value.
   - `undefined` and simple values keep their own types (`.type()` is `"undefined"`, `"simple"`), unequal to `null`; simple values compare by number.
 - **Arithmetic** is decimal, as in SQL/JSON, and runs PostgreSQL's `numeric` functions, so results and scales match jsonb's. A result of scale 0 becomes an integer (a bignum if large); any other a decimal fraction (tag 4) keeping its scale: `2 * 3` is `6`, `2 * 2.5` is `5.0`, `4([-1, 50])`. Results returned unchanged from the document keep their CBOR form (a float stays a float).
@@ -355,7 +355,7 @@ The set-returning functions run in value-per-call mode, using core iterators tha
 | `cbor → bool` | `true`/`false` only |
 | `cbor → int2/int4/int8` | Integers in range |
 | `cbor → float4/float8` | Integers or floats |
-| `cbor → numeric` | Integers, floats (NaN and ±Infinity included), tags 2/3/4, tag 5 when exact |
+| `cbor → numeric` | Integers, floats (NaN and ±Infinity included), tags 2/3/4/5 within `numeric`'s range and scale |
 | `cbor → timestamptz` | Tag 0 (RFC 3339 text) or tag 1 (epoch number) |
 | `cbor → uuid` | Tag 37 with 16 bytes |
 | `cbor → date` | Tag 100 |

@@ -26,6 +26,9 @@ SELECT to_cbor('text'::text), to_cbor('\xdead'::bytea), to_cbor('a3bb189e-8bf9-3
 SELECT to_cbor('2024-01-01 00:00:00.5+00'::timestamptz), to_cbor('2024-01-01'::date), to_cbor(ARRAY[[1,2],[3,4]]), to_cbor(ARRAY[1,NULL]);
 SELECT to_cbor(ROW(1, 'x', ARRAY[true])), to_cbor('{"a": [1, 2.5, "s", null], "a": 3}'::json), to_cbor('{"x": 18446744073709551616}'::jsonb);
 SELECT '1'::cbor::int4, '-1'::cbor::int8, '1.5'::cbor::float8, '1'::cbor::numeric, '4([-2, 27315])'::cbor::numeric, '2(h''010000000000000000'')'::cbor::numeric, 'true'::cbor::bool;
+-- Bigfloats are exact decimals: m × 2^-n has n places, up to numeric's 16383.
+SELECT '5([-1, 3])'::cbor::numeric, '5([-3, -3])'::cbor::numeric, '5([3, 3])'::cbor::numeric;
+SELECT '5([-16384, 1])'::cbor::numeric;
 SELECT '40000'::cbor::int2;
 SELECT '"x"'::cbor::int4;
 SELECT '1(1704067200.5)'::cbor::timestamptz AT TIME ZONE 'UTC', '0("2024-01-01T00:00:00Z")'::cbor::timestamptz AT TIME ZONE 'UTC', '100(19723)'::cbor::date, '37(h''a3bb189e8bf938889912ace4e6543002'')'::cbor::uuid;

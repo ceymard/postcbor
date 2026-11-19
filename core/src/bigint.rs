@@ -78,6 +78,41 @@ pub fn be_to_decimal(mag: &[u8]) -> String {
     out
 }
 
+/// `mag × base^n` for a big-endian magnitude; `base` at most 10.
+pub fn mul_pow(mag: &[u8], base: u64, n: u32) -> Result<Vec<u8>> {
+    // The largest power of `base` that fits in a u64 multiplies at each step.
+    let (mut step, mut per) = (1u64, 0u32);
+    while let Some(next) = step.checked_mul(base) {
+        step = next;
+        per += 1;
+    }
+    let mut limbs: Vec<u64> = mag.rchunks(8).map(|c| c.iter().fold(0u64, |a, &b| (a << 8) | u64::from(b))).collect();
+    let mut left = n;
+    while left > 0 {
+        let k = left.min(per);
+        let m = base.pow(k);
+        let mut carry: u128 = 0;
+        for l in limbs.iter_mut() {
+            let x = u128::from(*l) * u128::from(m) + carry;
+            *l = x as u64;
+            carry = x >> 64;
+        }
+        if carry > 0 {
+            limbs.try_reserve(1).map_err(|_| Error::new(ErrorKind::OutOfMemory, 0))?;
+            limbs.push(carry as u64);
+        }
+        left -= k;
+    }
+    let mut out = Vec::new();
+    out.try_reserve(limbs.len() * 8).map_err(|_| Error::new(ErrorKind::OutOfMemory, 0))?;
+    for l in limbs.iter().rev() {
+        out.extend_from_slice(&l.to_be_bytes());
+    }
+    let first = out.iter().position(|&b| b != 0).unwrap_or(out.len());
+    out.drain(..first);
+    Ok(out)
+}
+
 /// Subtracts one from a non-zero big-endian magnitude.
 pub fn minus_one(mag: &mut Vec<u8>) {
     for b in mag.iter_mut().rev() {
@@ -136,6 +171,14 @@ mod tests {
         assert_eq!(be_to_decimal(&digits_to_be(dec.as_bytes(), 10).unwrap()), dec);
         assert_eq!(be_to_decimal(&digits_to_be(b"10000000000000000000", 10).unwrap()), "10000000000000000000");
         assert!(digits_to_be(b"12a", 10).is_err());
+    }
+
+    #[test]
+    fn powers_multiply_exactly() {
+        assert_eq!(be_to_decimal(&mul_pow(&[3], 5, 1).unwrap()), "15");
+        assert_eq!(be_to_decimal(&mul_pow(&[1], 5, 30).unwrap()), "931322574615478515625");
+        assert_eq!(be_to_decimal(&mul_pow(&[1], 2, 100).unwrap()), "1267650600228229401496703205376");
+        assert_eq!(mul_pow(&[], 5, 3).unwrap(), [] as [u8; 0]);
     }
 
     #[test]

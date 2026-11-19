@@ -39,7 +39,10 @@ fn int_text(neg: bool, mag: &[u8]) -> String {
     if neg && d != "0" { format!("-{d}") } else { d }
 }
 
-/// Decimal text of a numeric item (integers, floats, bignums, tag 4, tag 5 with exponent ≥ 0), or None.
+/// `numeric`'s largest scale: bigfloats with more binary places have no `numeric` value.
+const MAX_SCALE: u32 = 16_383;
+
+/// Decimal text of a numeric item (integers, floats, bignums, tags 4 and 5), or None.
 /// Floats give `NaN`, `Infinity`, `-Infinity` or their shortest exact decimal.
 pub fn to_decimal(v: &Value) -> Result<Option<String>> {
     if let Some((neg, mag)) = integer(v)? {
@@ -60,26 +63,18 @@ pub fn to_decimal(v: &Value) -> Result<Option<String>> {
                 Kind::Negative(n) => -1 - i64::try_from(n).map_err(|_| bad("exponent out of range"))?,
                 _ => return Err(bad("exponent must be an integer")),
             };
-            let (neg, mut mag) = integer(&m)?.ok_or(bad("mantissa must be an integer"))?;
+            let (neg, mag) = integer(&m)?.ok_or(bad("mantissa must be an integer"))?;
             if t == 4 {
                 Some(format!("{}e{exp}", int_text(neg, &mag)))
+            } else if exp >= 0 {
+                if exp > 100_000 {
+                    return Err(bad("bigfloat exponent out of range"));
+                }
+                Some(int_text(neg, &bigint::mul_pow(&mag, 2, exp as u32)?))
             } else {
-                if !(0..=100_000).contains(&exp) {
-                    return Err(bad("bigfloat with a negative exponent has no exact numeric value"));
-                }
-                // mantissa × 2^exp
-                for _ in 0..exp {
-                    let mut carry = 0u8;
-                    for b in mag.iter_mut().rev() {
-                        let x = (u16::from(*b) << 1) | u16::from(carry);
-                        *b = x as u8;
-                        carry = (x >> 8) as u8;
-                    }
-                    if carry > 0 {
-                        mag.insert(0, carry);
-                    }
-                }
-                Some(int_text(neg, &mag))
+                // mantissa × 2^-n is exactly mantissa × 5^n × 10^-n: n digits after the point.
+                let n = u32::try_from(exp.unsigned_abs()).ok().filter(|&n| n <= MAX_SCALE).ok_or(bad("bigfloat exponent out of range"))?;
+                Some(format!("{}e{exp}", int_text(neg, &bigint::mul_pow(&mag, 5, n)?)))
             }
         }
         _ => None,
@@ -161,6 +156,8 @@ mod tests {
         assert_eq!(dec("18446744073709551616").as_deref(), Some("18446744073709551616"));
         assert_eq!(dec("4([-2, 27315])").as_deref(), Some("27315e-2"));
         assert_eq!(dec("5([3, -3])").as_deref(), Some("-24"));
+        assert_eq!(dec("5([-1, 3])").as_deref(), Some("15e-1"));
+        assert_eq!(dec("5([-3, -3])").as_deref(), Some("-375e-3"));
         assert_eq!(dec("1.5").as_deref(), Some("1.5"));
         assert_eq!(dec("NaN").as_deref(), Some("NaN"));
         assert_eq!(dec("\"1\""), None);
