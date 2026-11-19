@@ -282,11 +282,13 @@ Queries:
 - **Compiled path**: the `jsonpath` value's binary form is decoded in the core (format version 1, stable since PG 12; PG 17 appended the `.bigint()` … `.timestamp_tz()` items). Unknown versions and items are refused, and so are paths nesting deeper than 256 items (arguments and chained steps both count). The decoded path is cached per call site.
 - **Numbers**: inside path expressions, numbers compare by value, as in SQL/JSON: `1 == 1.0`, and bignums, decimal fractions and bigfloats are numbers. A float takes the value of its shortest decimal form, as when it is converted to jsonb. Containment and `=` stay typed.
 - **CBOR types jsonpath lacks**:
-  - Byte strings: `.type()` is `"bytes"`; comparing them with other types is unknown, as jsonpath does for mismatched types.
-  - Tags 2–5 are numbers; tags 0 and 1 are datetimes; other tags are transparent (the path sees their content).
+  - Byte strings: `.type()` is `"bytes"`; two byte strings compare by their bytes, and comparing them with other types is unknown, as jsonpath does for mismatched types.
+  - Tags 2 and 3 are numbers, and tags 4 and 5 when their content is `[integer, integer or bignum]`; tags 0 and 1 are datetimes; other tags are transparent (the path sees their content, and a result taken from the document keeps its tag).
   - Map keys that are not text: `.key` matches only text keys; `.*` and `.keyvalue()` visit every entry, and `.keyvalue()` gives the key as its CBOR value.
-  - `undefined` and simple values keep their own types (`.type()` is `"undefined"`, `"simple"`), unequal to `null`.
-- **Arithmetic** is decimal, as in SQL/JSON, and runs PostgreSQL's `numeric` functions, so results and scales match jsonb's. A result becomes an integer (a bignum if large) when it is whole, else a decimal fraction (tag 4) keeping its scale: `2 * 2.5` is `5.0`, `4([-1, 50])`.
+  - `undefined` and simple values keep their own types (`.type()` is `"undefined"`, `"simple"`), unequal to `null`; simple values compare by number.
+- **Arithmetic** is decimal, as in SQL/JSON, and runs PostgreSQL's `numeric` functions, so results and scales match jsonb's. A result of scale 0 becomes an integer (a bignum if large); any other a decimal fraction (tag 4) keeping its scale: `2 * 3` is `6`, `2 * 2.5` is `5.0`, `4([-1, 50])`. Results returned unchanged from the document keep their CBOR form (a float stays a float).
+- **NaN and ±Infinity** floats are numbers, ordered as `numeric` orders them: NaN equals itself and sorts above everything.
+- **`.keyvalue()` ids** are unique per object, as in jsonb, and equal to jsonb's for objects at the top of the document. jsonb derives the others from its own byte layout; ours come from positions in the CBOR value, so they differ.
 - **Regex and datetimes**: `like_regex` runs PostgreSQL's regex engine; the datetime methods use PostgreSQL's datetime parsing.
 - **GIN**: `@?` and `@@` use `cbor_ops` and `cbor_path_ops` for paths made of key accessors and equality with constants, as jsonb's classes do.
 
