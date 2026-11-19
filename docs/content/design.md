@@ -439,7 +439,8 @@ Core rules:
   - normalizing any stored body again gives the same body (idempotence, section 6)
 - **Byte-input fuzz targets**: normalize (including packed input) and the EDN parser. The corpus is committed under `fuzz/corpus/`. Seeds: RFC 8949 Appendix A, regression cases, `cbor2` output.
 - **Cross-check against Python `cbor2`** (a test-only tool, `uv run --with cbor2 tests/crosscheck.py [count]`): random values encoded by `cbor2` (plain and canonical) must be accepted, and their normalized form must decode to the same value, compared type-strictly (1 ≠ 1.0, -0.0 ≠ 0.0). It drives the core through `core/examples/normalize_lines.rs`.
-- **SQL tests**: `pg_regress` suites under `postbor/tests/pg_regress/`, run by `cargo pgrx regress` against pgrx-managed PostgreSQL 15, 16, 17 and 18 (`make test-matrix`). `make test` runs them against the major of `PG_CONFIG`.
+- **SQL tests**: `pg_regress` suites under `postbor/tests/pg_regress/`, run by `cargo pgrx regress` against pgrx-managed PostgreSQL 15, 16, 17 and 18 (`make test-matrix`). `make test` runs them against the major of `PG_CONFIG`. Some suites have a second expected output (`*_1.out`) for PostgreSQL 15 and 16.
+- **CI** (GitHub Actions) runs clippy and the SQL suites on each version, Miri, and every fuzz target for 30 s, on each push and pull request.
 
 ## 11. Dependencies
 

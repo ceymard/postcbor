@@ -6,6 +6,8 @@ FEATURES := --no-default-features --features pg$(PG_MAJOR)
 # Majors for the test matrix; they must be registered with `cargo pgrx init`.
 PG_VERSIONS ?= 15 16 17 18
 FUZZ_SECONDS ?= 60
+# Toolchain for Miri and fuzzing (CI pins a dated nightly).
+NIGHTLY ?= nightly
 # Extra flags for `cargo pgrx install`, e.g. --sudo to install into root-owned system directories.
 PGRX_INSTALL_FLAGS ?=
 
@@ -39,11 +41,11 @@ test-matrix: test-core
 	done
 
 miri:
-	$(CARGO) +nightly miri test -p postbor-core
+	$(CARGO) +$(NIGHTLY) miri test -p postbor-core
 
 fuzz:
-	set -e; cd fuzz && for t in $$($(CARGO) +nightly fuzz list); do \
-		$(CARGO) +nightly fuzz run $$t -- -max_total_time=$(FUZZ_SECONDS); \
+	set -e; cd fuzz && for t in $$($(CARGO) +$(NIGHTLY) fuzz list); do \
+		$(CARGO) +$(NIGHTLY) fuzz run $$t -- -max_total_time=$(FUZZ_SECONDS); \
 	done
 
 crosscheck:
