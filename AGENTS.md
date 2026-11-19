@@ -32,7 +32,7 @@ Every byte that comes from a user is hostile. The core is where it is parsed, so
 
 - `#![forbid(unsafe_code)]`, and no dependencies.
 - Read bytes only through `cursor`. Elsewhere, use cursor methods rather than slice indexing or pointer arithmetic on input or body bytes.
-- Iterate with an explicit stack, limited by `max_depth`; core functions never recurse.
+- Iterate with an explicit stack, limited by `max_depth`; core functions never recurse. The one exception is the jsonpath evaluator, over the path expression only (design §9).
 - Use checked arithmetic (`checked_add`, `checked_mul`, …) for every offset and length.
 - Use only exact float operations: basic arithmetic and `float::pow2`, never `powi`/`powf`.
 - Allocate buffers sized by input with `try_reserve`, after checking the declared length against the bytes remaining.
