@@ -1301,3 +1301,241 @@ pub fn write_array(items: &[JItem], out: &mut impl OutBuf, max_depth: usize) -> 
     }
     datum::finish_index(out, base, max_depth)
 }
+
+/// A host without PostgreSQL, for tests and fuzzing: integer arithmetic only, Rust's number parsing, and
+/// substring search for `like_regex`.
+#[derive(Default)]
+pub struct PlainHost;
+
+impl Host for PlainHost {
+    fn arith(&mut self, op: BinOp, a: &Num, b: &Num, _throw: bool) -> Option<Num> {
+        let (Num::Int(a), Num::Int(b)) = (a, b) else { return None };
+        let (a, b) = (i128::from(*a), i128::from(*b));
+        let r = match op {
+            BinOp::Add => a + b,
+            BinOp::Sub => a - b,
+            BinOp::Mul => a * b,
+            BinOp::Div if b != 0 && a % b == 0 => a / b,
+            BinOp::Mod if b != 0 => a % b,
+            _ => return None,
+        };
+        i64::try_from(r).ok().map(Num::Int)
+    }
+    fn parse_float8(&mut self, s: &str) -> Option<f64> {
+        s.trim().parse().ok()
+    }
+    fn float8_numeric(&mut self, f: f64) -> Num {
+        Num::parse(&format!("{f:?}")).unwrap_or(Num::NaN)
+    }
+    fn parse_int(&mut self, s: &str, bits64: bool) -> Option<i64> {
+        let i: i64 = s.trim().parse().ok()?;
+        (bits64 || i32::try_from(i).is_ok()).then_some(i)
+    }
+    fn parse_bool(&mut self, s: &str) -> Option<bool> {
+        match s.trim() {
+            "true" | "t" => Some(true),
+            "false" | "f" => Some(false),
+            _ => None,
+        }
+    }
+    fn parse_numeric(&mut self, s: &str, _typmod: i32) -> Option<Num> {
+        Num::parse(s.trim()).ok()
+    }
+    fn numeric_typmod(&mut self, _precision: i32, _scale: i32, _throw: bool) -> Option<i32> {
+        None
+    }
+    fn regex_match(&mut self, pattern: &[u8], _flags: u32, s: &[u8]) -> bool {
+        pattern.is_empty() || s.windows(pattern.len()).any(|w| w == pattern)
+    }
+    fn check_stack(&mut self) {}
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ctx::PlainCtx;
+    use crate::datum::Datum;
+    use crate::edn;
+
+    /// Path items for building compiled paths by hand.
+    enum P {
+        Root,
+        Cur,
+        Key(&'static str),
+        AnyArray,
+        Any(u32, u32),
+        Num(&'static str),
+        Bin(u8, Vec<P>, Vec<P>),
+        Filter(Vec<P>),
+        Method(u8),
+    }
+
+    fn word(buf: &mut [u8], at: usize, v: i32) {
+        buf[at..at + 4].copy_from_slice(&v.to_ne_bytes());
+    }
+
+    /// Writes a chain of items in PostgreSQL's layout; returns the first item's offset.
+    fn enc(buf: &mut Vec<u8>, chain: &[P]) -> usize {
+        let (p, rest) = chain.split_first().unwrap();
+        while !buf.len().is_multiple_of(4) {
+            buf.push(0);
+        }
+        let start = buf.len();
+        let typ = match p {
+            P::Root => 27,
+            P::Cur => 26,
+            P::Key(_) => 25,
+            P::AnyArray => 21,
+            P::Any(..) => 24,
+            P::Num(_) => 2,
+            P::Bin(t, ..) => *t,
+            P::Filter(_) => 29,
+            P::Method(t) => *t,
+        };
+        buf.extend_from_slice(&[typ, 0, 0, 0, 0, 0, 0, 0]);
+        let slot = |buf: &mut Vec<u8>| {
+            buf.extend_from_slice(&[0; 4]);
+            buf.len() - 4
+        };
+        match p {
+            P::Key(k) => {
+                buf.extend_from_slice(&(k.len() as u32).to_ne_bytes());
+                buf.extend_from_slice(k.as_bytes());
+                buf.push(0);
+            }
+            P::Any(a, b) => {
+                buf.extend_from_slice(&a.to_ne_bytes());
+                buf.extend_from_slice(&b.to_ne_bytes());
+            }
+            P::Num(t) => Num::parse(t).unwrap().write_numeric(buf).unwrap(),
+            P::Bin(_, l, r) => {
+                let (ls, rs) = (slot(buf), slot(buf));
+                let lo = enc(buf, l);
+                word(buf, ls, (lo - start) as i32);
+                let ro = enc(buf, r);
+                word(buf, rs, (ro - start) as i32);
+            }
+            P::Filter(c) => {
+                let s = slot(buf);
+                let o = enc(buf, c);
+                word(buf, s, (o - start) as i32);
+            }
+            _ => {}
+        }
+        if !rest.is_empty() {
+            let n = enc(buf, rest);
+            word(buf, start + 4, (n - start) as i32);
+        }
+        start
+    }
+
+    fn compile(lax: bool, chain: &[P]) -> Vec<u8> {
+        let mut data = Vec::new();
+        enc(&mut data, chain);
+        let mut v = (0x01u32 | if lax { 0x8000_0000 } else { 0 }).to_ne_bytes().to_vec();
+        v.extend_from_slice(&data);
+        v
+    }
+
+    fn doc(text: &str) -> Vec<u8> {
+        let mut d = Vec::new();
+        edn::to_datum(text.as_bytes(), &mut d, &mut PlainCtx::default()).unwrap();
+        d
+    }
+
+    /// Results as EDN, or the outcome when there are none.
+    fn run(lax: bool, chain: &[P], text: &str, throw: bool) -> Result<Vec<String>, String> {
+        let bin = compile(lax, chain);
+        let path = Path::decode(&bin).unwrap();
+        let d = doc(text);
+        let d = Datum::parse(&d).unwrap();
+        let mut found = Vec::new();
+        let res = execute(&path, Value::root(&d), None, throw, &mut PlainHost, Some(&mut found)).map_err(|e| format!("{e:?}"))?;
+        if res == Res::Error {
+            return Err(format!("suppressed after {}", found.len()));
+        }
+        Ok(found
+            .iter()
+            .map(|it| {
+                let mut out = Vec::new();
+                write_datum(it, &mut out, 1000).unwrap();
+                let mut s = Vec::new();
+                edn::print(&Value::root(&Datum::parse(&out).unwrap()), &mut s, Default::default()).unwrap();
+                String::from_utf8(s).unwrap()
+            })
+            .collect())
+    }
+
+    fn exists(lax: bool, chain: &[P], text: &str) -> Res {
+        let bin = compile(lax, chain);
+        let path = Path::decode(&bin).unwrap();
+        let d = doc(text);
+        let d = Datum::parse(&d).unwrap();
+        execute(&path, Value::root(&d), None, false, &mut PlainHost, None).unwrap()
+    }
+
+    const GT: u8 = 11;
+    const ADD: u8 = 14;
+    const EQ: u8 = 8;
+
+    #[test]
+    fn filters_keep_items_whose_condition_holds() {
+        let path = [P::Root, P::Key("a"), P::AnyArray, P::Filter(vec![P::Bin(GT, vec![P::Cur], vec![P::Num("1")])])];
+        assert_eq!(run(true, &path, r#"{"a": [1, 2, 4([-1, 15]), "x"]}"#, true).unwrap(), ["2", "4([-1, 15])"]);
+    }
+
+    #[test]
+    fn lax_mode_unwraps_arrays_and_strict_mode_errors() {
+        let path = [P::Root, P::Key("a"), P::Key("b")];
+        let d = r#"{"a": [{"b": 1}, {"b": 2}]}"#;
+        assert_eq!(run(true, &path, d, true).unwrap(), ["1", "2"]);
+        assert!(run(false, &path, d, true).unwrap_err().contains("MemberNotFound"));
+        assert_eq!(run(false, &path, d, false).unwrap_err(), "suppressed after 0");
+    }
+
+    #[test]
+    fn silent_mode_keeps_results_found_before_an_error() {
+        let path = [P::Root, P::AnyArray, P::Key("a")];
+        assert_eq!(run(false, &path, r#"[{"a": 1}, 2, {"a": 3}]"#, false).unwrap_err(), "suppressed after 1");
+    }
+
+    #[test]
+    fn any_visits_every_level_depth_first() {
+        let path = [P::Root, P::Any(0, u32::MAX)];
+        assert_eq!(run(true, &path, r#"[[1, [2]], {"a": 3}]"#, true).unwrap(), ["[[1, [2]], {\"a\": 3}]", "[1, [2]]", "1", "[2]", "2", "{\"a\": 3}", "3"]);
+        let path = [P::Root, P::Any(2, 2)];
+        assert_eq!(run(true, &path, r#"[[1, [2]], {"a": 3}]"#, true).unwrap(), ["1", "[2]", "3"]);
+    }
+
+    #[test]
+    fn any_descends_a_deep_document_without_recursion() {
+        let n = if cfg!(miri) { 200 } else { 20_000 };
+        let text = format!("{}1{}", "[".repeat(n), "]".repeat(n));
+        let mut d = Vec::new();
+        let mut ctx = PlainCtx::default();
+        ctx.0.max_depth = n + 1;
+        edn::to_datum(text.as_bytes(), &mut d, &mut ctx).unwrap();
+        let bin = compile(false, &[P::Root, P::Any(0, u32::MAX)]);
+        let path = Path::decode(&bin).unwrap();
+        let d = Datum::parse(&d).unwrap();
+        let mut found = Vec::new();
+        execute(&path, Value::root(&d), None, true, &mut PlainHost, Some(&mut found)).unwrap();
+        assert_eq!(found.len(), n + 1);
+    }
+
+    #[test]
+    fn existence_checks_stop_at_the_first_match() {
+        // The second element would raise in strict mode; the first match ends evaluation before it.
+        let path = [P::Root, P::AnyArray, P::Filter(vec![P::Bin(EQ, vec![P::Cur, P::Key("a")], vec![P::Num("1")])])];
+        assert_eq!(exists(true, &path, r#"[{"a": 1}, 2]"#), Res::Ok);
+        assert_eq!(exists(true, &path, r#"[{"a": 2}]"#), Res::NotFound);
+    }
+
+    #[test]
+    fn arithmetic_and_methods() {
+        assert_eq!(run(true, &[P::Bin(ADD, vec![P::Root, P::Key("a")], vec![P::Num("1")])], r#"{"a": 2}"#, true).unwrap(), ["3"]);
+        assert_eq!(run(true, &[P::Root, P::AnyArray, P::Method(31)], r#"[1, "x", h'00', undefined, {}]"#, true).unwrap(), [r#""number""#, r#""string""#, r#""bytes""#, r#""undefined""#, r#""object""#]);
+        assert_eq!(run(true, &[P::Root, P::Method(38)], r#"{"a": 1, 2: [3]}"#, true).unwrap(), [r#"{"id": 0, "key": 2, "value": [3]}"#, r#"{"id": 0, "key": "a", "value": 1}"#]);
+        assert_eq!(run(true, &[P::Root, P::Method(34)], "-1.5", true).unwrap(), ["-2"]);
+    }
+}
