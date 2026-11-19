@@ -12,6 +12,6 @@ So no human has read most of the code. What stands behind it is mechanical:
 - **SQL regression suites** on PostgreSQL 15, 16, 17 and 18, including PostgreSQL's own jsonpath tests run on both `jsonb` and `cbor`.
 - **Cross-checks** against other implementations: Python's `cbor2` and JavaScript's cbor-x.
 
-These are run locally during development. A CI configuration runs them on every change, but the repository is not yet published, so it has not run there yet.
+All of these are run locally during development. A CI configuration runs clippy, the SQL suites, Miri and a short fuzzing pass on every change, but the repository is not yet published, so it has not run there yet; the cross-checks are run by hand.
 
 Judge it accordingly. The tests cover what was thought of; review by someone who knows Rust and PostgreSQL internals would cover what was not. Reports of bugs, and especially of anything a crafted input can do to a server, are welcome.

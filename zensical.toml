@@ -31,7 +31,6 @@ language = "en"
 features = [
   "content.code.copy",
   "navigation.footer",
-  "navigation.instant",
   "navigation.path",
   "navigation.sections",
   "navigation.top",

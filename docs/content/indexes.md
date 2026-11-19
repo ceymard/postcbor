@@ -4,7 +4,7 @@
 
 `cbor` has default btree and hash operator classes, so `CREATE INDEX ON t (c)`, `UNIQUE`, `ORDER BY`, `DISTINCT`, `GROUP BY` and hash joins work as for any type. The btree order is described in [Operators](operators.md#equality-and-ordering).
 
-To index one field, index an expression, as with `jsonb`:
+To index the value of one key, index an expression, as with `jsonb`:
 
 ```sql
 CREATE INDEX ON events ((payload -> 'device'));
