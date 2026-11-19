@@ -1,6 +1,6 @@
 # Performance
 
-Measured on 2026-11-18 (storage) and 2026-11-19 (timings) against `jsonb`: PostgreSQL 18, built without assertions for the timings, and a release build of postbor, on one development machine. Ratios are `cbor` time divided by `jsonb` time, measured back to back (below 1 means `cbor` is faster). They are a rough guide, not a benchmark suite: run `bench/lookup.sql` on your own data and hardware before deciding.
+Measured on 2026-11-18 (storage) and 2026-11-19 (timings) against `jsonb`: PostgreSQL 18, built without assertions for the timings, and a release build of postcbor, on one development machine. Ratios are `cbor` time divided by `jsonb` time, measured back to back (below 1 means `cbor` is faster). They are a rough guide, not a benchmark suite: run `bench/lookup.sql` on your own data and hardware before deciding.
 
 ## Storage
 

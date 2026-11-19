@@ -1,4 +1,4 @@
-# postbor
+# postcbor
 
 A PostgreSQL extension that adds a `cbor` type, the CBOR counterpart of `jsonb`. Written in Rust with pgrx.
 
@@ -22,7 +22,7 @@ A PostgreSQL extension that adds a `cbor` type, the CBOR counterpart of `jsonb`.
 - Function comments: one or two sentences. Public items are the exception: state what the caller cannot see in the signature (distinguishable errors, ownership, panics, lifetimes), not how it works.
 - When replying or writing specs, docs or comments, use plain English, no jargon, no buzzwords.
 - Update the docs (`docs/content`) as you work on the code; they must always be accurate. The user pages restate the spec for users: a behaviour change updates both. Run each SQL example against PostgreSQL when you write or change it, and paste its real output.
-- The site states that postbor was written by AI and how it was reviewed (`how-built.md`, README); keep that page true as the process changes.
+- The site states that postcbor was written by AI and how it was reviewed (`how-built.md`, README); keep that page true as the process changes.
 - Keep previously built docs (`docs/site`) in place when testing with zensical; deleting them breaks the live server.
 - In markdown, write each paragraph on one line; editors soft-wrap.
 - Before declaring done: `cargo clippy --all-targets -- -D warnings`, `make test`, `make miri` if `core/` changed, and `make docs` if `docs/content` changed.
@@ -41,7 +41,7 @@ Every byte that comes from a user is hostile. The core is where it is parsed, so
 - Return `Result<_, Error>` for every condition the input can cause. A panic means a bug.
 - Loops over input call `ctx.check_interrupts()` periodically.
 
-# pgrx glue (`postbor/`)
+# pgrx glue (`postcbor/`)
 
 - `unsafe` lives only in the modules listed in design §9 (raw PostgreSQL APIs). Each `unsafe` block gets a one-line comment stating its invariant.
 - Raise errors in expression position with `error::fail` (the `ereport!` macro cannot be used as an expression).
@@ -56,4 +56,4 @@ Every byte that comes from a user is hostile. The core is where it is parsed, so
 # Tests
 
 - Core: unit tests next to the code, and property tests as fuzz targets (`fuzz/`). Commit new fuzz corpus entries and crash reproducers as regression cases.
-- SQL behaviour: `pg_regress` suites in `postbor/tests/pg_regress/`, run against pgrx-managed PostgreSQL 15–18 (`make test-matrix`; register them once with `cargo pgrx init`).
+- SQL behaviour: `pg_regress` suites in `postcbor/tests/pg_regress/`, run against pgrx-managed PostgreSQL 15–18 (`make test-matrix`; register them once with `cargo pgrx init`).

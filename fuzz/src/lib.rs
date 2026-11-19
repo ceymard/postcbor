@@ -2,10 +2,10 @@
 
 use core::cmp::Ordering;
 
-use postbor_core::ctx::{Limits, PlainCtx};
-use postbor_core::datum::{self, Datum};
-use postbor_core::value::{Kind, Value};
-use postbor_core::{cmp, edn, json};
+use postcbor_core::ctx::{Limits, PlainCtx};
+use postcbor_core::datum::{self, Datum};
+use postcbor_core::value::{Kind, Value};
+use postcbor_core::{cmp, edn, json};
 
 /// Small limits keep each run fast and still exercise the limit paths.
 pub fn ctx() -> PlainCtx {
@@ -69,9 +69,9 @@ fn check_lookups(v: &Value) {
 
 /// Checks `ops::contains` against a direct recursive reading of the jsonb rules, and that a value contains itself.
 pub fn check_contains(a: &Value, b: &Value) {
-    let got = postbor_core::ops::contains(a, b, &mut ctx()).unwrap();
+    let got = postcbor_core::ops::contains(a, b, &mut ctx()).unwrap();
     assert_eq!(got, contains_ref(a, b, true), "containment disagrees with the reference");
-    assert!(postbor_core::ops::contains(a, a, &mut ctx()).unwrap(), "a value does not contain itself");
+    assert!(postcbor_core::ops::contains(a, a, &mut ctx()).unwrap(), "a value does not contain itself");
     if got {
         check_index_entries(a, b);
     }
@@ -88,14 +88,14 @@ pub fn check_contains(a: &Value, b: &Value) {
         let Some(stored) = store(&p) else { continue };
         let d = Datum::parse(&stored).unwrap();
         let sub = Value::root(&d);
-        assert!(postbor_core::ops::contains(a, &sub, &mut ctx()).unwrap(), "a value does not contain its own entry");
+        assert!(postcbor_core::ops::contains(a, &sub, &mut ctx()).unwrap(), "a value does not contain its own entry");
         check_index_entries(a, &sub);
     }
 }
 
 /// A GIN index must never miss a match: the entries of a contained value are entries of its container.
 fn check_index_entries(a: &Value, b: &Value) {
-    use postbor_core::gin;
+    use postcbor_core::gin;
     let ops = |v: &Value| {
         let mut out = std::collections::HashSet::new();
         gin::ops_entries(v, |e| {
@@ -135,7 +135,7 @@ fn contains_ref(a: &Value, b: &Value, top: bool) -> bool {
             .array_iter()
             .unwrap()
             .all(|be| a.array_iter().unwrap().any(|ae| contains_ref(&ae.unwrap(), be.as_ref().unwrap(), false))),
-        (Kind::Tag(x), Kind::Tag(y)) if x == y && postbor_core::ops::is_number_tag(x) => a.bytes().unwrap() == b.bytes().unwrap(),
+        (Kind::Tag(x), Kind::Tag(y)) if x == y && postcbor_core::ops::is_number_tag(x) => a.bytes().unwrap() == b.bytes().unwrap(),
         (Kind::Tag(x), Kind::Tag(y)) => x == y && contains_ref(&a.tag_content().unwrap(), &b.tag_content().unwrap(), false),
         (ka, kb) if is_container(&ka) || is_container(&kb) => false,
         _ => a.bytes().unwrap() == b.bytes().unwrap(),

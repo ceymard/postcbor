@@ -1,6 +1,6 @@
 # Install
 
-postbor is built from source; there are no pre-built packages yet.
+postcbor is built from source; there are no pre-built packages yet.
 
 ## Requirements
 
@@ -22,9 +22,9 @@ make install PG_CONFIG=/path/to/pg_config PGRX_INSTALL_FLAGS=--sudo    # or let 
 Then, in each database:
 
 ```sql
-CREATE EXTENSION postbor;
+CREATE EXTENSION postcbor;
 ```
 
 ## UTF-8 databases only
 
-`CREATE EXTENSION postbor` fails in a database whose encoding is not UTF-8. CBOR text strings are UTF-8, and supporting other encodings would mean converting every text argument, path, column name and output at the boundary, for databases that are rare in practice.
+`CREATE EXTENSION postcbor` fails in a database whose encoding is not UTF-8. CBOR text strings are UTF-8, and supporting other encodings would mean converting every text argument, path, column name and output at the boundary, for databases that are rare in practice.

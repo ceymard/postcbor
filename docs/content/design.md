@@ -1,11 +1,11 @@
-# postbor design
+# postcbor design
 
-This is the reference specification: how postbor behaves, exactly. The user pages describe the same behaviour less formally. In the repository, `CONTEXT.md` defines the terms used here, `docs/adr/` records the reasons behind decisions (cited as ADR-NNNN), and `TODO.md` tracks the implementation plan.
+This is the reference specification: how postcbor behaves, exactly. The user pages describe the same behaviour less formally. In the repository, `CONTEXT.md` defines the terms used here, `docs/adr/` records the reasons behind decisions (cited as ADR-NNNN), and `TODO.md` tracks the implementation plan.
 
 ## 1. Goals and scope
 
 - A `cbor` type that does for CBOR what `jsonb` does for JSON: the same operators, the same functions (named `cbor_*` instead of `jsonb_*`), and the same index support, extended to the full CBOR data model.
-- Extension name `postbor`, type name `cbor`. Operator symbols are the same as jsonb's, plus `?#`, `?#|` and `?#&` for keys of any type.
+- Extension name `postcbor`, type name `cbor`. Operator symbols are the same as jsonb's, plus `?#`, `?#|` and `?#&` for keys of any type.
 - PostgreSQL 15–18.
 - Install with `make && make install` (a wrapper around `cargo pgrx install`). Pre-built packages are out of scope for now.
 
@@ -17,11 +17,11 @@ The stored datum is trusted after input, as with jsonb. Debug builds (`debug_ass
 
 | Setting | Default | Context | Applies to |
 |---|---|---|---|
-| `postbor.max_depth` | 512 | `SUSET` | Nesting depth on every input path and in builders. Each array, map and tag counts as one level. |
-| `postbor.max_expansion_ratio` | 16 | `SUSET` | Body size after normalization divided by input size. Matters for packed input. |
-| `postbor.max_expanded_size` | 256MB (unit kB) | `SUSET` | Absolute body size after normalization. |
+| `postcbor.max_depth` | 512 | `SUSET` | Nesting depth on every input path and in builders. Each array, map and tag counts as one level. |
+| `postcbor.max_expansion_ratio` | 16 | `SUSET` | Body size after normalization divided by input size. Matters for packed input. |
+| `postcbor.max_expanded_size` | 256MB (unit kB) | `SUSET` | Absolute body size after normalization. |
 
-The index section is not counted in the expansion limits. Results of edits (`||`, `cbor_set`, subscript assignment, …) are held to `postbor.max_depth` too: `||` can wrap a value in an array, and a stored value deeper than input accepts could not be dumped and restored (found by fuzzing). Values are also limited to PostgreSQL's 1 GB varlena maximum.
+The index section is not counted in the expansion limits. Results of edits (`||`, `cbor_set`, subscript assignment, …) are held to `postcbor.max_depth` too: `||` can wrap a value in an array, and a stored value deeper than input accepts could not be dumped and restored (found by fuzzing). Values are also limited to PostgreSQL's 1 GB varlena maximum.
 
 Errors raised, by SQLSTATE:
 
@@ -91,7 +91,7 @@ body_len = u32 little-endian, the last 4 bytes of the datum, present only when h
   1. The directory entries with `s ≤ container_offset < e` form a contiguous run `[a, b)`, and their tables are contiguous too.
   2. The new datum is: a header, the body slice, then (if `b > a`) the directory run with `container_offset − s` and table positions moved down by the run's first table position (width flags kept), the table bytes, and `body_len`.
   3. No entry table is rebuilt.
-- **Building**: the index is built in one walk over the finished body (also used for values built by edits). The same walk enforces `postbor.max_depth`.
+- **Building**: the index is built in one walk over the finished body (also used for values built by edits). The same walk enforces `postcbor.max_depth`.
 - **Detoasting**: datums are read with `pg_detoast_datum_packed` (a 1-byte varlena header is fine, since we only read bytes).
 - **Format version**: any version other than 0 is rejected with an error asking the user to upgrade the extension.
 
@@ -160,7 +160,7 @@ Packing schemes recognized:
 - **cbor-x's own packing** (`pack` option): an older packed-CBOR draft, using tag 51 for the table, with tag 6 and simple-value references inside its scope.
 - **cbor-x bundled strings** (`bundleStrings`): not supported. cbor-x writes the strings after the value, so the input is not a single item and is refused.
 
-Limits: expansion is bounded by `postbor.max_expansion_ratio` and `postbor.max_expanded_size`, nesting by `postbor.max_depth`. A reference cycle is an error.
+Limits: expansion is bounded by `postcbor.max_expansion_ratio` and `postcbor.max_expanded_size`, nesting by `postcbor.max_depth`. A reference cycle is an error.
 
 Implementation (`core/src/pack.rs`):
 - Normalization stops with an internal signal when it meets a table-setup or record tag (113, 1113, 51, 57342–65535); only then is the input decoded into an arena and resolved. Unpacked input pays nothing.
@@ -169,7 +169,7 @@ Implementation (`core/src/pack.rs`):
 - cbor-x tag 51 is `[values, prefixes, suffixes, rump]`; only the value table is used (cbor-x's encoder writes empty prefix and suffix tables).
 - Reference chains longer than 64 are rejected (loops); every arena node is charged against a memory budget of four times the output limit.
 - Output packing is deterministic: `ietf` puts strings of 3+ bytes used at least twice into a tag 113 table (largest saving first, ties by bytes), except when the value holds plain simple values 0–15 or tags 6/128–143, which would read as references inside tag 113 (found by fuzzing): such values are returned unpacked; `cbor-x` turns maps whose text-key set repeats into an inline record definition (57343) at first use and record references (57344+) afterwards, up to 8191 structures (ids up to `0xfffe`; cbor-x confuses id 8191 with its inline-definition tag).
-- A value packed more than `postbor.max_expansion_ratio` times smaller than its unpacked form is rejected on input; raise the setting for such data.
+- A value packed more than `postcbor.max_expansion_ratio` times smaller than its unpacked form is rejected on input; raise the setting for such data.
 
 Output: `cbor_pack(c cbor, format text DEFAULT 'cbor-x') → bytea`.
 - `'cbor-x'` emits records (57342/57344+).
@@ -388,7 +388,7 @@ The set-returning functions run in value-per-call mode, using core iterators tha
 
 Cargo workspace, crates fetched from crates.io:
 
-- **`core/` (`postbor-core`)**: pure Rust, no dependencies, `#![forbid(unsafe_code)]`. Every byte-level operation lives here.
+- **`core/` (`postcbor-core`)**: pure Rust, no dependencies, `#![forbid(unsafe_code)]`. Every byte-level operation lives here.
   - `cursor`: the only code that indexes into input or body bytes. Every read is bounds-checked and returns `Result`.
   - `normalize`: input bytes → deterministic body, including unpacking (`pack`).
   - `pack`: unpacking packed input, and `cbor_pack`.
@@ -402,9 +402,9 @@ Cargo workspace, crates fetched from crates.io:
   - `gin`: the walk over a value's keys and atomic items, and the GIN entries built from it. `jsonpath::gin`: the entries and AND/OR program of a path query, and the path-equality form.
   - `jsonpath`: decoding PostgreSQL's compiled `jsonpath` (and a printer for tests), and the evaluator (`jsonpath::eval`), which calls a host trait for `numeric` arithmetic, input functions and regexes. `decimal`: exact decimals and jsonpath numbers, in and out of PostgreSQL's `numeric` binary form.
   - `ctx`, `out`, `error`: limits and interrupt checks, the output buffer trait, errors.
-- **`postbor/`**: the pgrx `cdylib`. It holds the SQL definitions, the conversions to and from PostgreSQL types, the settings, and turning core errors into `ereport` calls. `unsafe` is allowed only where raw PostgreSQL APIs are unavoidable: `datum` (varlena wrapper, `PallocBuf`), `io` (receive buffer, encoding conversion), `convert` (`to_cbor` over any type: arrays, composites, catalog lookups), `build` (`VARIADIC "any"` and aggregate states), `record` (row construction), `subscript`, `gin` (GIN support functions), and `path` (the evaluator's host: `numeric` functions, input functions, regexes). Each `unsafe` block carries a one-line comment stating its invariant.
+- **`postcbor/`**: the pgrx `cdylib`. It holds the SQL definitions, the conversions to and from PostgreSQL types, the settings, and turning core errors into `ereport` calls. `unsafe` is allowed only where raw PostgreSQL APIs are unavoidable: `datum` (varlena wrapper, `PallocBuf`), `io` (receive buffer, encoding conversion), `convert` (`to_cbor` over any type: arrays, composites, catalog lookups), `build` (`VARIADIC "any"` and aggregate states), `record` (row construction), `subscript`, `gin` (GIN support functions), and `path` (the evaluator's host: `numeric` functions, input functions, regexes). Each `unsafe` block carries a one-line comment stating its invariant.
 - **jsonb conversion** goes through JSON text: `cbor → jsonb` prints JSON with the core's `json` module and calls `jsonb_in`; `jsonb/json → cbor` reads `jsonb_out`/`json_out` text with the EDN parser (JSON is a subset of EDN). Replace with direct `JsonbValue` building only if benchmarks show it matters.
-- **`fuzz/`**: cargo-fuzz targets. Depends only on `postbor-core`. Not part of the default workspace build.
+- **`fuzz/`**: cargo-fuzz targets. Depends only on `postcbor-core`. Not part of the default workspace build.
 
 Core rules:
 - **No `powi`/`powf`** or other float functions without exact results: only basic IEEE operations and bit-level construction (`float::pow2`). Miri caught `powi` giving different results.
@@ -422,8 +422,8 @@ Core rules:
 
 ## 10. Testing
 
-- **Core unit tests** (`cargo test -p postbor-core`): every normalization rule, every EDN form, format edge cases (index threshold boundaries, extraction rebasing).
-- **Miri** on `postbor-core` tests.
+- **Core unit tests** (`cargo test -p postcbor-core`): every normalization rule, every EDN form, format edge cases (index threshold boundaries, extraction rebasing).
+- **Miri** on `postcbor-core` tests.
 - **Property tests**, written as fuzz targets with `arbitrary` that generate valid values:
   - decode → encode → decode is the same value
   - EDN out → in is the same value
@@ -434,7 +434,7 @@ Core rules:
   - normalizing any stored body again gives the same body (idempotence, section 6)
 - **Byte-input fuzz targets**: normalize (including packed input) and the EDN parser. The corpus is committed under `fuzz/corpus/`. Seeds: RFC 8949 Appendix A, regression cases, `cbor2` output.
 - **Cross-check against Python `cbor2`** (a test-only tool, `uv run --with cbor2 tests/crosscheck.py [count]`): random values encoded by `cbor2` (plain and canonical) must be accepted, and their normalized form must decode to the same value, compared type-strictly (1 ≠ 1.0, -0.0 ≠ 0.0). It drives the core through `core/examples/normalize_lines.rs`.
-- **SQL tests**: `pg_regress` suites under `postbor/tests/pg_regress/`, run by `cargo pgrx regress` against pgrx-managed PostgreSQL 15, 16, 17 and 18 (`make test-matrix`). `make test` runs them against the major of `PG_CONFIG`. Some suites have a second expected output (`*_1.out`) for PostgreSQL 15 and 16.
+- **SQL tests**: `pg_regress` suites under `postcbor/tests/pg_regress/`, run by `cargo pgrx regress` against pgrx-managed PostgreSQL 15, 16, 17 and 18 (`make test-matrix`). `make test` runs them against the major of `PG_CONFIG`. Some suites have a second expected output (`*_1.out`) for PostgreSQL 15 and 16.
 - **CI** (GitHub Actions) runs clippy and the SQL suites on each version, Miri, and every fuzz target for 30 s, on each push and pull request.
 
 ## 11. Dependencies

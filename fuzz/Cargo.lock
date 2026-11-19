@@ -84,16 +84,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "postbor-core"
+name = "postcbor-core"
 version = "0.1.0"
 
 [[package]]
-name = "postbor-fuzz"
+name = "postcbor-fuzz"
 version = "0.0.0"
 dependencies = [
  "arbitrary",
  "libfuzzer-sys",
- "postbor-core",
+ "postcbor-core",
 ]
 
 [[package]]

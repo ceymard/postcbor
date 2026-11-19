@@ -1,6 +1,6 @@
 # How this was built
 
-postbor was written entirely by Claude, Anthropic's AI model, working through Claude Code: the Rust code, the SQL definitions, the tests, the fuzz targets, the specification and this documentation.
+postcbor was written entirely by Claude, Anthropic's AI model, working through Claude Code: the Rust code, the SQL definitions, the tests, the fuzz targets, the specification and this documentation.
 
 A human set the goals and made the design decisions: what the type should do, how it compares to `jsonb`, and the architecture. The choice of Rust with pgrx rather than C was theirs, made for memory safety on untrusted input. They directed the work and reviewed it at the level of design and tests, not line by line. They are not a Rust developer.
 

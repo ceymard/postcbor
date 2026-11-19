@@ -24,26 +24,26 @@ PGRX_REGISTER = grep -qs '^pg$(PG_MAJOR) *= *"$(shell $(PG_CONFIG) --bindir)/pg_
 
 all:
 	$(PGRX_REGISTER)
-	cd postbor && $(CARGO) pgrx package --pg-config $(PG_CONFIG) $(FEATURES)
+	cd postcbor && $(CARGO) pgrx package --pg-config $(PG_CONFIG) $(FEATURES)
 
 install:
 	$(PGRX_REGISTER)
-	cd postbor && $(CARGO) pgrx install --release --pg-config $(PG_CONFIG) $(FEATURES) $(PGRX_INSTALL_FLAGS)
+	cd postcbor && $(CARGO) pgrx install --release --pg-config $(PG_CONFIG) $(FEATURES) $(PGRX_INSTALL_FLAGS)
 
 test-core:
-	$(CARGO) test -p postbor-core
+	$(CARGO) test -p postcbor-core
 
 # SQL tests against pgrx's PostgreSQL of the same major as PG_CONFIG.
 test: test-core
-	cd postbor && $(CARGO) pgrx regress pg$(PG_MAJOR) --resetdb $(FEATURES)
+	cd postcbor && $(CARGO) pgrx regress pg$(PG_MAJOR) --resetdb $(FEATURES)
 
 test-matrix: test-core
 	set -e; for v in $(PG_VERSIONS); do \
-		(cd postbor && $(CARGO) pgrx regress pg$$v --resetdb --no-default-features --features pg$$v); \
+		(cd postcbor && $(CARGO) pgrx regress pg$$v --resetdb --no-default-features --features pg$$v); \
 	done
 
 miri:
-	$(CARGO) +$(NIGHTLY) miri test -p postbor-core
+	$(CARGO) +$(NIGHTLY) miri test -p postcbor-core
 
 fuzz:
 	set -e; cd fuzz && for t in $$($(CARGO) +$(NIGHTLY) fuzz list); do \

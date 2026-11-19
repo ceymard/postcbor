@@ -1,6 +1,6 @@
 """Turns PostgreSQL's jsonb jsonpath regression tests into a differential suite for cbor.
 
-Usage: python3 tests/jsonpath/extract_cases.py <postgres source dir> > postbor/tests/pg_regress/sql/jsonpath_diff.sql
+Usage: python3 tests/jsonpath/extract_cases.py <postgres source dir> > postcbor/tests/pg_regress/sql/jsonpath_diff.sql
 
 Each statement using jsonb_path_*, @? or @@ becomes two: a cbor copy (jsonb_path_ -> cbor_path_, jsonb literals ->
 cbor), and a jsonb reference that reads each document and vars literal as cbor and casts it to jsonb, so that both sides

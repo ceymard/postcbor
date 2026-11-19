@@ -1,6 +1,6 @@
 # Documentation site: `make docs` builds it into docs/site, `make docs-serve` serves it.
 [project]
-site_name = "postbor"
+site_name = "postcbor"
 site_description = "A cbor type for PostgreSQL: the CBOR counterpart of jsonb"
 docs_dir = "docs/content"
 site_dir = "docs/site"

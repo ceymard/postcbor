@@ -1,4 +1,4 @@
-/// Input limits, from the `postbor.*` settings.
+/// Input limits, from the `postcbor.*` settings.
 #[derive(Clone, Copy, Debug)]
 pub struct Limits {
     pub max_depth: usize,

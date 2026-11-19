@@ -1,6 +1,6 @@
 """Collects every single-quoted literal from PostgreSQL's jsonpath regression tests, as candidate paths.
 
-Usage: python3 tests/jsonpath/extract_paths.py <postgres source dir> > postbor/tests/pg_regress/sql/jsonpath_decode.sql
+Usage: python3 tests/jsonpath/extract_paths.py <postgres source dir> > postcbor/tests/pg_regress/sql/jsonpath_decode.sql
 The literals that do not parse as jsonpath on the running PostgreSQL version are skipped by the suite itself.
 """
 import re
@@ -34,11 +34,11 @@ BEGIN
         END;
         checked := checked + 1;
         BEGIN
-            IF postbor_jsonpath_print(p)::jsonpath::text <> p::text THEN
-                RAISE WARNING 'path % printed as %', p, postbor_jsonpath_print(p);
+            IF postcbor_jsonpath_print(p)::jsonpath::text <> p::text THEN
+                RAISE WARNING 'path % printed as %', p, postcbor_jsonpath_print(p);
             END IF;
         EXCEPTION WHEN others THEN
-            RAISE WARNING 'path % printed as % fails: %', p, postbor_jsonpath_print(p), SQLERRM;
+            RAISE WARNING 'path % printed as % fails: %', p, postcbor_jsonpath_print(p), SQLERRM;
         END;
     END LOOP;
     IF checked < 300 THEN
@@ -48,6 +48,6 @@ END $$;
 -- A path read from a table (stored with a short header, not aligned) decodes the same.
 CREATE TEMP TABLE stored (p jsonpath);
 INSERT INTO stored VALUES ('$.a'), ('strict $.a[1 to 3, last]'), ('$ ? (@.x > 1.50 && @.y like_regex "^a" flag "i")');
-SELECT count(*) FROM stored WHERE postbor_jsonpath_print(p)::jsonpath::text <> p::text;
+SELECT count(*) FROM stored WHERE postcbor_jsonpath_print(p)::jsonpath::text <> p::text;
 -- Nesting beyond the decoder's limit is refused cleanly.
-SELECT postbor_jsonpath_print(('$' || repeat('.a', 300))::jsonpath);""")
+SELECT postcbor_jsonpath_print(('$' || repeat('.a', 300))::jsonpath);""")

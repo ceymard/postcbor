@@ -457,15 +457,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "postbor"
+name = "postcbor"
 version = "0.1.0"
 dependencies = [
  "pgrx",
- "postbor-core",
+ "postcbor-core",
 ]
 
 [[package]]
-name = "postbor-core"
+name = "postcbor-core"
 version = "0.1.0"
 
 [[package]]

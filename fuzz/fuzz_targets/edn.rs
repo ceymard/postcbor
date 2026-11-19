@@ -4,7 +4,7 @@ use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {
     let mut out = Vec::new();
-    if postbor_core::edn::to_datum(data, &mut out, &mut postbor_fuzz::ctx()).is_ok() {
-        postbor_fuzz::check_stored(&out);
+    if postcbor_core::edn::to_datum(data, &mut out, &mut postcbor_fuzz::ctx()).is_ok() {
+        postcbor_fuzz::check_stored(&out);
     }
 });

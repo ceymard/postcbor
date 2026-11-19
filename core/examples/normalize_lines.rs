@@ -1,8 +1,8 @@
 //! Test helper for the cross-check script: reads hex CBOR per line, prints the normalized body as hex or `ERR <kind>`.
 use std::io::{BufRead, Write};
 
-use postbor_core::ctx::PlainCtx;
-use postbor_core::datum::{Datum, from_cbor};
+use postcbor_core::ctx::PlainCtx;
+use postcbor_core::datum::{Datum, from_cbor};
 
 fn main() {
     let stdin = std::io::stdin();

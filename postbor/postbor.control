@@ -1,6 +1,0 @@
-comment = 'CBOR data type with jsonb-like operators and functions'
-default_version = '@CARGO_VERSION@'
-module_pathname = 'postbor'
-relocatable = false
-superuser = true
-trusted = false

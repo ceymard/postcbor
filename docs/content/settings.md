@@ -1,20 +1,20 @@
 # Settings and limits
 
-postbor treats every input as hostile: values arrive from applications over the network through `::cbor`, `bytea::cbor` and the binary protocol. Every input path goes through the same checks and limits.
+postcbor treats every input as hostile: values arrive from applications over the network through `::cbor`, `bytea::cbor` and the binary protocol. Every input path goes through the same checks and limits.
 
 ## Settings
 
 | Setting | Default | Limits |
 |---|---|---|
-| `postbor.max_depth` | 512 | Nesting depth of a value. Each array, map and tag counts as one level |
-| `postbor.max_expansion_ratio` | 16 | Size of a value after unpacking, divided by the size of its input |
-| `postbor.max_expanded_size` | 256MB | Size of a value after unpacking |
+| `postcbor.max_depth` | 512 | Nesting depth of a value. Each array, map and tag counts as one level |
+| `postcbor.max_expansion_ratio` | 16 | Size of a value after unpacking, divided by the size of its input |
+| `postcbor.max_expanded_size` | 256MB | Size of a value after unpacking |
 
 Only superusers can change them (`SET`, `ALTER ROLE … SET`, `ALTER DATABASE … SET`, or the server configuration).
 
 The depth limit also applies to values built by functions and operators (`||`, `cbor_set`, `cbor_build_array`, subscript assignment, …): a value deeper than input accepts could be stored but not dumped and restored.
 
-The expansion limits matter for [packed CBOR](binary-form.md#packed-cbor), where a small input can unpack to a very large value. Raise `postbor.max_expansion_ratio` for data that is legitimately packed more than 16 times.
+The expansion limits matter for [packed CBOR](binary-form.md#packed-cbor), where a small input can unpack to a very large value. Raise `postcbor.max_expansion_ratio` for data that is legitimately packed more than 16 times.
 
 Values are also limited by PostgreSQL's maximum of 1 GB per field.
 
@@ -30,5 +30,5 @@ Values are also limited by PostgreSQL's maximum of 1 GB per field.
 
 ```sql
 SELECT repeat('[', 600)::cbor;
--- ERROR:  cbor value rejected: nesting depth exceeds postbor.max_depth at byte 512
+-- ERROR:  cbor value rejected: nesting depth exceeds postcbor.max_depth at byte 512
 ```

@@ -3,13 +3,13 @@
 //! sample documents without panicking. Whenever `@?` or `@@` holds for a document, the GIN query must not rule out
 //! that document's index entries.
 use libfuzzer_sys::fuzz_target;
-use postbor_core::ctx::PlainCtx;
-use postbor_core::datum::Datum;
-use postbor_core::gin::{OpsEntry, index_entries};
-use postbor_core::jsonpath::eval::{PlainHost, Res, Seq, bool_or_null, execute, write_array};
-use postbor_core::jsonpath::gin::{Tri, query, run};
-use postbor_core::jsonpath::{Path, print};
-use postbor_core::value::Value;
+use postcbor_core::ctx::PlainCtx;
+use postcbor_core::datum::Datum;
+use postcbor_core::gin::{OpsEntry, index_entries};
+use postcbor_core::jsonpath::eval::{PlainHost, Res, Seq, bool_or_null, execute, write_array};
+use postcbor_core::jsonpath::gin::{Tri, query, run};
+use postcbor_core::jsonpath::{Path, print};
+use postcbor_core::value::Value;
 
 const DOCS: [&str; 4] = [
     r#"{"a": [1, 2.5, "x", {"b": null}], "c": 42(h'01'), 3: [true, undefined]}"#,
@@ -64,6 +64,6 @@ fuzz_target!(|data: &[u8]| {
 
 fn doc(text: &str) -> Vec<u8> {
     let mut d = Vec::new();
-    postbor_core::edn::to_datum(text.as_bytes(), &mut d, &mut PlainCtx::default()).unwrap();
+    postcbor_core::edn::to_datum(text.as_bytes(), &mut d, &mut PlainCtx::default()).unwrap();
     d
 }

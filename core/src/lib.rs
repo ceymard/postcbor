@@ -1,4 +1,4 @@
-//! Byte-level CBOR operations for postbor: normalization, the datum format, navigation, ordering and EDN.
+//! Byte-level CBOR operations for postcbor: normalization, the datum format, navigation, ordering and EDN.
 //! Every function that reads untrusted bytes goes through [`cursor::Cursor`].
 #![forbid(unsafe_code)]
 

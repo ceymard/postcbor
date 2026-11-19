@@ -1,10 +1,10 @@
 //! Test helper for tests/cborx: reads hex CBOR per line, prints `cbor_pack(value, 'cbor-x')` as hex, or `ERR <kind>`.
 use std::io::{BufRead, Write};
 
-use postbor_core::ctx::PlainCtx;
-use postbor_core::datum::{Datum, from_cbor};
-use postbor_core::pack::{PackFormat, pack};
-use postbor_core::value::Value;
+use postcbor_core::ctx::PlainCtx;
+use postcbor_core::datum::{Datum, from_cbor};
+use postcbor_core::pack::{PackFormat, pack};
+use postcbor_core::value::Value;
 
 fn main() {
     let mut out = std::io::stdout().lock();

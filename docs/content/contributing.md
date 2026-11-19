@@ -2,8 +2,8 @@
 
 ## Layout
 
-- `core/`: the pure Rust crate (`postbor-core`) that does every byte-level operation: parsing, normalization, EDN, comparison, containment, packing, GIN entries, jsonpath evaluation. No dependencies and no `unsafe` code.
-- `postbor/`: the pgrx extension that exposes the core to SQL: types, operators, functions, casts, settings, errors.
+- `core/`: the pure Rust crate (`postcbor-core`) that does every byte-level operation: parsing, normalization, EDN, comparison, containment, packing, GIN entries, jsonpath evaluation. No dependencies and no `unsafe` code.
+- `postcbor/`: the pgrx extension that exposes the core to SQL: types, operators, functions, casts, settings, errors.
 - `fuzz/`: cargo-fuzz targets over the core.
 - `docs/content/`: this site. [`design.md`](design.md) is the specification.
 
@@ -13,7 +13,7 @@ In the repository, `AGENTS.md` holds the coding rules, `CONTEXT.md` the domain t
 
 | Command | Runs |
 |---|---|
-| `make test` | core unit tests, then the SQL suites (`postbor/tests/pg_regress/`) against pgrx's PostgreSQL of the same major version as `PG_CONFIG` |
+| `make test` | core unit tests, then the SQL suites (`postcbor/tests/pg_regress/`) against pgrx's PostgreSQL of the same major version as `PG_CONFIG` |
 | `make test-matrix` | the same on PostgreSQL 15, 16, 17 and 18 (register them once with `cargo pgrx init`) |
 | `make clippy` | clippy with warnings as errors |
 | `make miri` | the core tests under Miri (nightly toolchain) |

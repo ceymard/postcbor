@@ -1,12 +1,12 @@
-# postbor
+# postcbor
 
-postbor is a PostgreSQL extension that adds a `cbor` type: the CBOR counterpart of `jsonb`. Values are stored in one canonical binary form, with the operators, functions and indexes you know from `jsonb`, extended to everything CBOR can hold: byte strings, tags, map keys of any type, exact integers of any size, floats kept apart from integers, `undefined` and simple values.
+postcbor is a PostgreSQL extension that adds a `cbor` type: the CBOR counterpart of `jsonb`. Values are stored in one canonical binary form, with the operators, functions and indexes you know from `jsonb`, extended to everything CBOR can hold: byte strings, tags, map keys of any type, exact integers of any size, floats kept apart from integers, `undefined` and simple values.
 
 !!! info "Built with AI"
-    postbor was written entirely by an AI model, Claude, directed by a human. See [How this was built](how-built.md) before you rely on it.
+    postcbor was written entirely by an AI model, Claude, directed by a human. See [How this was built](how-built.md) before you rely on it.
 
 ```sql
-CREATE EXTENSION postbor;
+CREATE EXTENSION postcbor;
 
 SELECT '{"name": "ann", 1: h''cafe'', "when": 1(1700000000), "n": 2.5}'::cbor;
 -- {1: h'cafe', "n": 2.5, "name": "ann", "when": 1(1700000000)}
@@ -29,4 +29,4 @@ SELECT '{"name": "ann", 1: h''cafe''}'::cbor -> 1;
 - [Text form](text-form.md) shows how to write values in SQL.
 - [Operators](operators.md), [Functions](functions.md), [Path queries](path-queries.md) and [Indexes](indexes.md) are the reference.
 
-postbor supports PostgreSQL 15 to 18, on UTF-8 databases only.
+postcbor supports PostgreSQL 15 to 18, on UTF-8 databases only.

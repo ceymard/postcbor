@@ -3,13 +3,13 @@
 use core::cmp::Ordering;
 
 use libfuzzer_sys::fuzz_target;
-use postbor_core::cmp::compare;
-use postbor_core::datum::Datum;
-use postbor_core::value::Value;
+use postcbor_core::cmp::compare;
+use postcbor_core::datum::Datum;
+use postcbor_core::value::Value;
 
 fuzz_target!(|parts: (Vec<u8>, Vec<u8>, Vec<u8>)| {
     let (Some(a), Some(b), Some(c)) =
-        (postbor_fuzz::store(&parts.0), postbor_fuzz::store(&parts.1), postbor_fuzz::store(&parts.2))
+        (postcbor_fuzz::store(&parts.0), postcbor_fuzz::store(&parts.1), postcbor_fuzz::store(&parts.2))
     else {
         return;
     };

@@ -16,7 +16,7 @@ Bytes go through the same checks and the same [normalization](text-form.md#one-s
 
 ## Packed CBOR
 
-Packed CBOR shares repeated items (strings, map shapes) through tables and references, so the bytes are smaller. postbor unpacks it on every input path: what is stored, compared and indexed is always the plain value.
+Packed CBOR shares repeated items (strings, map shapes) through tables and references, so the bytes are smaller. postcbor unpacks it on every input path: what is stored, compared and indexed is always the plain value.
 
 Recognized on input:
 
@@ -48,4 +48,4 @@ Compatibility with cbor-x is tested against cbor-x 1.6.7: its records and `pack`
 
 ## Limits
 
-Packed input can unpack to far more than its own size. Input is refused when the unpacked value is more than `postbor.max_expansion_ratio` times the input (default 16) or larger than `postbor.max_expanded_size` (default 256MB); see [Settings and limits](settings.md).
+Packed input can unpack to far more than its own size. Input is refused when the unpacked value is more than `postcbor.max_expansion_ratio` times the input (default 16) or larger than `postcbor.max_expanded_size` (default 256MB); see [Settings and limits](settings.md).

@@ -1,4 +1,4 @@
-# postbor
+# postcbor
 
 A PostgreSQL extension that adds a `cbor` data type with the same role, operators and functions as `jsonb`, extended to the full CBOR data model.
 
@@ -62,7 +62,7 @@ A CBOR tag number with its content. Always kept. Only some tags are interpreted.
 _Avoid_: annotation, extension (alone)
 
 **Interpreted tag**:
-A tag whose meaning postbor uses in some operation (casts, comparison, normalization): 0, 1, 2, 3, 4, 5, 37, 52, 54, 100.
+A tag whose meaning postcbor uses in some operation (casts, comparison, normalization): 0, 1, 2, 3, 4, 5, 37, 52, 54, 100.
 
 **Simple value**:
 A CBOR major type 7 value that is not a float: false, true, null, undefined, or an unassigned simple(n).
@@ -77,7 +77,7 @@ CBOR Extended Diagnostic Notation, the text form of `cbor` values.
 _Avoid_: diagnostic notation (alone), diag
 
 **Packed input**:
-CBOR that uses a packing scheme (IETF Packed CBOR, cbor-x records) to share repeated items. It is always unpacked during normalization. postbor never stores it.
+CBOR that uses a packing scheme (IETF Packed CBOR, cbor-x records) to share repeated items. It is always unpacked during normalization. postcbor never stores it.
 _Avoid_: compressed CBOR
 
 **Packing format**:
@@ -86,9 +86,9 @@ A named packing scheme for `cbor_pack` output: `ietf` (IETF Packed CBOR) or `cbo
 ### Code structure
 
 **Core**:
-The pure Rust crate (`postbor-core`) that holds every byte-level operation. It has no PostgreSQL dependency.
+The pure Rust crate (`postcbor-core`) that holds every byte-level operation. It has no PostgreSQL dependency.
 _Avoid_: library, engine
 
 **Glue**:
-The pgrx crate (`postbor`) that exposes the core to SQL.
+The pgrx crate (`postcbor`) that exposes the core to SQL.
 _Avoid_: bindings, wrapper

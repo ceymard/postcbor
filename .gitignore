@@ -1,8 +1,8 @@
 /target
 **/*.rs.bk
-postbor/tests/pg_regress/results
-postbor/tests/pg_regress/regression.diffs
-postbor/tests/pg_regress/regression.out
+postcbor/tests/pg_regress/results
+postcbor/tests/pg_regress/regression.diffs
+postcbor/tests/pg_regress/regression.out
 fuzz/target
 fuzz/artifacts
 docs/site

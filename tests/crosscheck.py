@@ -84,7 +84,7 @@ for _ in range(COUNT):
         originals.append(v)
 
 out = subprocess.run(
-    ["cargo", "run", "-q", "--release", "-p", "postbor-core", "--example", "normalize_lines"],
+    ["cargo", "run", "-q", "--release", "-p", "postcbor-core", "--example", "normalize_lines"],
     input="\n".join(inputs) + "\n", capture_output=True, text=True, check=True,
 ).stdout.splitlines()
 

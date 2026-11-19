@@ -1,0 +1,89 @@
+-- Text input is normalized: keys sorted, shortest forms, indefinite lengths removed.
+SELECT '{"b": 1, "a": [1, 2.5, h''ff'', 1(0)], 10: null}'::cbor;
+                      cbor                      
+------------------------------------------------
+ {10: null, "a": [1, 2.5, h'ff', 1(0)], "b": 1}
+(1 row)
+
+SELECT '[_ 1, 1.0, 1.5e300, -0.0, NaN, Infinity, -Infinity]'::cbor;
+                       cbor                        
+---------------------------------------------------
+ [1, 1.0, 1.5e300, -0.0, NaN, Infinity, -Infinity]
+(1 row)
+
+SELECT '18446744073709551616'::cbor, '-18446744073709551617'::cbor, '2(h''01'')'::cbor;
+           cbor           |           cbor           | cbor 
+--------------------------+--------------------------+------
+ 2(h'010000000000000000') | 3(h'010000000000000000') | 1
+(1 row)
+
+SELECT '<<1, "a">>'::cbor, '(_ "ab", "cd")'::cbor, 'b64''SGk='''::cbor;
+   cbor    |  cbor  |  cbor   
+-----------+--------+---------
+ h'016161' | "abcd" | h'4869'
+(1 row)
+
+SELECT 'dt''2024-01-01T00:00:00Z'''::cbor, 'DT''2024-01-01T00:00:00.5Z'''::cbor, 'IP''192.0.2.0/24'''::cbor;
+    cbor    |      cbor       |        cbor         
+------------+-----------------+---------------------
+ 1704067200 | 1(1704067200.5) | 52([24, h'c00002'])
+(1 row)
+
+SELECT '"é \u0001 \"q\""'::cbor;
+       cbor       
+------------------
+ "é \u0001 \"q\""
+(1 row)
+
+-- Invalid text.
+SELECT '[1, 2'::cbor;
+ERROR:  invalid input syntax for type cbor: expected ',' or ']' at byte 5 at character 8
+SELECT '[1,]'::cbor;
+ERROR:  invalid input syntax for type cbor: trailing comma at byte 3 at character 8
+SELECT '{1: 2, 1: 3}'::cbor;
+ERROR:  invalid input syntax for type cbor: duplicate map key at character 8
+SELECT '{1: 2, 2(h''01''): 3}'::cbor;
+ERROR:  invalid input syntax for type cbor: duplicate map key at character 8
+SELECT 'b32''AA'''::cbor;
+ERROR:  invalid input syntax for type cbor: unsupported application literal at byte 0 at character 8
+-- Stored values read back unchanged, including ones whose text fills the output buffer exactly.
+CREATE TABLE io_t (c cbor);
+INSERT INTO io_t VALUES ('{"x": [1, 2, 3]}'), ('"abcdefghijklmn"'), ('[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17]');
+SELECT c FROM io_t;
+                              c                              
+-------------------------------------------------------------
+ {"x": [1, 2, 3]}
+ "abcdefghijklmn"
+ [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
+(3 rows)
+
+-- Binary send/recv round-trip through COPY.
+COPY io_t TO '/tmp/postcbor_io_t.bin' WITH (FORMAT binary);
+CREATE TABLE io_t2 (c cbor);
+COPY io_t2 FROM '/tmp/postcbor_io_t.bin' WITH (FORMAT binary);
+SELECT c FROM io_t2;
+                              c                              
+-------------------------------------------------------------
+ {"x": [1, 2, 3]}
+ "abcdefghijklmn"
+ [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
+(3 rows)
+
+SELECT cbor_send('{"b": 1, "a": 2}');
+    cbor_send     
+------------------
+ \xa2616102616201
+(1 row)
+
+DROP TABLE io_t, io_t2;
+-- Limits.
+SET postcbor.max_depth = 2;
+SELECT '[[1]]'::cbor;
+ cbor  
+-------
+ [[1]]
+(1 row)
+
+SELECT '[[[1]]]'::cbor;
+ERROR:  cbor value rejected: nesting depth exceeds postcbor.max_depth at byte 2 at character 8
+RESET postcbor.max_depth;

@@ -1,5 +1,5 @@
-// Checks postbor against real cbor-x, both directions (bundleStrings must be refused):
-//   1. what cbor-x writes (records, pack, bundleStrings) normalizes in postbor to the plain encoding of the same objects;
+// Checks postcbor against real cbor-x, both directions (bundleStrings must be refused):
+//   1. what cbor-x writes (records, pack, bundleStrings) normalizes in postcbor to the plain encoding of the same objects;
 //   2. what cbor_pack(..., 'cbor-x') writes decodes in cbor-x to the original objects.
 // Run with a cbor-x install on NODE_PATH (no package is added to this repository), e.g.
 //   NODE_PATH=/path/to/node_modules node tests/cborx/check.mjs
@@ -30,11 +30,11 @@ const encoders = {
   "records (new Encoder())": new Encoder(),
   "records, pack": new Encoder({ pack: true }),
 };
-// bundleStrings writes the strings after the value (not one CBOR item): postbor must refuse it, never store it wrong.
+// bundleStrings writes the strings after the value (not one CBOR item): postcbor must refuse it, never store it wrong.
 const rejected = { "records, bundleStrings": new Encoder({ bundleStrings: true }) };
 
 const run = (example, lines) =>
-  execFileSync("cargo", ["run", "-q", "--release", "-p", "postbor-core", "--example", example], { input: lines.join("\n") + "\n" })
+  execFileSync("cargo", ["run", "-q", "--release", "-p", "postcbor-core", "--example", example], { input: lines.join("\n") + "\n" })
     .toString().trim().split("\n");
 
 let failures = 0;
