@@ -317,24 +317,26 @@ Queries:
 | `jsonb_each`, `_text` | `cbor_each`, `_text` | `cbor_each` returns `(key cbor, value cbor)`; `_text` returns both as text |
 | `jsonb_object_keys` | `cbor_object_keys` | Returns `setof cbor`, keeping the key's type |
 | `jsonb_extract_path`, `_text` | `cbor_extract_path`, `_text` | `VARIADIC text[]` |
-| `jsonb_populate_record`, `_recordset` | `cbor_populate_record`, `_recordset` | Text keys match columns; other keys are ignored. Nested composites and 1-D arrays are converted; tags 0/1, 37 and 100 go to `timestamptz`, `uuid` and `date` columns. `_valid` is not implemented yet |
+| `jsonb_populate_record`, `_recordset`, `_valid` | `cbor_populate_record`, `_recordset`, `_valid` | Text keys match columns; other keys are ignored. Nested composites and arrays (nested arrays are dimensions) are converted; tags 0/1, 37 and 100 go to `timestamptz`, `uuid` and `date` columns. `_valid` (PostgreSQL 17+, as jsonb's) returns whether `cbor_populate_record` would succeed |
 | `jsonb_to_record`, `_recordset` | `cbor_to_record`, … | |
 | `jsonb_strip_nulls(…, strip_in_arrays)` | `cbor_strip_nulls(…, strip_in_arrays DEFAULT false, strip_undefined DEFAULT false)` | `undefined` is only stripped when `strip_undefined` is true |
 | `jsonb_set`, `jsonb_set_lax`, `jsonb_insert` | `cbor_set`, `cbor_set_lax`, `cbor_insert` | `text[]` path; typed-path versions are the `*_path` functions above |
 | `jsonb_delete_path` (`#-`) | `cbor_delete_text_path` (`#-`) | Renamed so it cannot be confused with the typed `cbor_delete_path(cbor, cbor)` |
 | `jsonb_pretty` | `cbor_pretty` | |
 | `jsonb_typeof` | `cbor_typeof` | Returns `integer`, `float`, `bytes`, `text`, `array`, `map`, `tag`, `simple`, `boolean`, `null`, `undefined` |
-| `jsonb_path_*` | `cbor_path_*` | Phase 3 |
+| `jsonb_path_*` | `cbor_path_*` | Path queries, below |
 
 The set-returning functions run in value-per-call mode, using core iterators that borrow the detoasted datum. If pgrx 0.20 requires `'static` iterators, the datum is copied once into the multi-call memory context.
 
-`populate_record` value conversion:
-- a text string goes through the column type's input function
+`populate_record` value conversion, following jsonb's `populate_record`:
+- a text string goes through the column type's input function (also for array and composite columns)
 - an integer or float goes to numeric columns directly
 - bytes go to `bytea`
-- a map goes to a composite column
-- an array goes to an array column
+- a map goes to a composite column; anything else but text is an error ("cannot call populate_composite on …"), and so is a top-level value that is not a map
+- an array goes to an array column: nested arrays are dimensions, taken from the first element at each level, and every sub-array must match them (at most 6); anything else but text is an error
 - anything else goes through its EDN text into the column's input function
+- a domain column converts to its base type, then checks the domain's constraints. Without a base row, an absent column is NULL and is checked too (`NOT NULL` domains fail); with one, absent columns keep the base row's values, and an empty map returns the base row
+- `_valid` makes every conversion and domain error a `false` result (soft errors; PostgreSQL 16 has no soft domain check, hence 17+). NULL for both arguments gives NULL, as jsonb's does
 
 ### CBOR-specific functions
 

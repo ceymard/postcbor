@@ -39,3 +39,53 @@ SELECT * FROM cbor_populate_recordset(NULL::rec_inner, '{"x": 1}');
 ERROR:  cannot call this function on a non-array
 DROP TYPE rec;
 DROP TYPE rec_inner;
+-- As jsonb's populate_record: domains are checked, NULL and absent columns included when there is no base row.
+CREATE DOMAIN rec_pos AS int[] CHECK (VALUE[1] > 0);
+CREATE DOMAIN rec_nn AS int NOT NULL;
+CREATE TYPE rec_d AS (a rec_pos, b rec_nn, c int);
+SELECT cbor_populate_record(null::rec_d, '{"a": [2], "b": 1, "c": 3}');
+ cbor_populate_record 
+----------------------
+ ({2},1,3)
+(1 row)
+
+SELECT cbor_populate_record(null::rec_d, '{"a": [-1], "b": 1}');
+ERROR:  value for domain rec_pos violates check constraint "rec_pos_check"
+SELECT cbor_populate_record(null::rec_d, '{"b": null}');
+ERROR:  domain rec_nn does not allow null values
+SELECT cbor_populate_record(null::rec_d, '{"c": 5}');
+ERROR:  domain rec_nn does not allow null values
+-- With a base row, absent columns keep its values; an empty map returns it.
+SELECT cbor_populate_record(row('{1}', 2, 3)::rec_d, '{"c": 9}'), cbor_populate_record(row('{1}', 2, 3)::rec_d, '{}');
+ cbor_populate_record | cbor_populate_record 
+----------------------+----------------------
+ ({1},2,9)            | ({1},2,3)
+(1 row)
+
+-- Only maps populate a row.
+SELECT cbor_populate_record(null::rec_d, '[1]');
+ERROR:  cannot call populate_composite on an array
+SELECT cbor_populate_record(null::rec_d, '1');
+ERROR:  cannot call populate_composite on a scalar
+-- Nested arrays are dimensions, taken from the first elements; sub-arrays must match.
+CREATE TYPE rec_a AS (a int[], t text[]);
+SELECT cbor_populate_record(null::rec_a, '{"a": [[1, 2], [3, 4]], "t": [["x"]]}'), cbor_populate_record(null::rec_a, '{"a": [[]]}'), cbor_populate_record(null::rec_a, '{"a": [[null], [1]]}'), cbor_populate_record(null::rec_a, '{"a": "{1,2}"}');
+  cbor_populate_record   | cbor_populate_record | cbor_populate_record | cbor_populate_record 
+-------------------------+----------------------+----------------------+----------------------
+ ("{{1,2},{3,4}}",{{x}}) | ({},)                | ("{{NULL},{1}}",)    | ("{1,2}",)
+(1 row)
+
+SELECT cbor_populate_record(null::rec_a, '{"a": [[1, 2], [3]]}');
+ERROR:  malformed array: sub-arrays must have matching dimensions
+SELECT cbor_populate_record(null::rec_a, '{"a": [[1], 2]}');
+ERROR:  expected an array
+SELECT cbor_populate_record(null::rec_a, '{"a": [1, [2]]}');
+ERROR:  invalid input syntax for type integer: "[2]"
+SELECT cbor_populate_record(null::rec_a, '{"a": 5}');
+ERROR:  expected an array
+SELECT cbor_populate_record(null::rec_a, '{"a": [[[[[[[1]]]]]]]}');
+ERROR:  number of array dimensions (7) exceeds the maximum allowed (6)
+DROP TYPE rec_a;
+DROP TYPE rec_d;
+DROP DOMAIN rec_pos;
+DROP DOMAIN rec_nn;

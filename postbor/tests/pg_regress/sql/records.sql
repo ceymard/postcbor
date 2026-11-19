@@ -10,3 +10,29 @@ SELECT * FROM cbor_populate_record(NULL::rec_inner, '{"x": "not a number"}');
 SELECT * FROM cbor_populate_recordset(NULL::rec_inner, '{"x": 1}');
 DROP TYPE rec;
 DROP TYPE rec_inner;
+
+-- As jsonb's populate_record: domains are checked, NULL and absent columns included when there is no base row.
+CREATE DOMAIN rec_pos AS int[] CHECK (VALUE[1] > 0);
+CREATE DOMAIN rec_nn AS int NOT NULL;
+CREATE TYPE rec_d AS (a rec_pos, b rec_nn, c int);
+SELECT cbor_populate_record(null::rec_d, '{"a": [2], "b": 1, "c": 3}');
+SELECT cbor_populate_record(null::rec_d, '{"a": [-1], "b": 1}');
+SELECT cbor_populate_record(null::rec_d, '{"b": null}');
+SELECT cbor_populate_record(null::rec_d, '{"c": 5}');
+-- With a base row, absent columns keep its values; an empty map returns it.
+SELECT cbor_populate_record(row('{1}', 2, 3)::rec_d, '{"c": 9}'), cbor_populate_record(row('{1}', 2, 3)::rec_d, '{}');
+-- Only maps populate a row.
+SELECT cbor_populate_record(null::rec_d, '[1]');
+SELECT cbor_populate_record(null::rec_d, '1');
+-- Nested arrays are dimensions, taken from the first elements; sub-arrays must match.
+CREATE TYPE rec_a AS (a int[], t text[]);
+SELECT cbor_populate_record(null::rec_a, '{"a": [[1, 2], [3, 4]], "t": [["x"]]}'), cbor_populate_record(null::rec_a, '{"a": [[]]}'), cbor_populate_record(null::rec_a, '{"a": [[null], [1]]}'), cbor_populate_record(null::rec_a, '{"a": "{1,2}"}');
+SELECT cbor_populate_record(null::rec_a, '{"a": [[1, 2], [3]]}');
+SELECT cbor_populate_record(null::rec_a, '{"a": [[1], 2]}');
+SELECT cbor_populate_record(null::rec_a, '{"a": [1, [2]]}');
+SELECT cbor_populate_record(null::rec_a, '{"a": 5}');
+SELECT cbor_populate_record(null::rec_a, '{"a": [[[[[[[1]]]]]]]}');
+DROP TYPE rec_a;
+DROP TYPE rec_d;
+DROP DOMAIN rec_pos;
+DROP DOMAIN rec_nn;

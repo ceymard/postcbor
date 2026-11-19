@@ -23,11 +23,11 @@ const PG_EPOCH_DAYS: i64 = 10_957;
 
 
 fn wrong_type(what: &str) -> ! {
-    ereport!(ERROR, PgSqlErrorCode::ERRCODE_INVALID_PARAMETER_VALUE, format!("cbor value is not {what}"));
+    not(what).raise()
 }
 
 fn out_of_range(what: &str) -> ! {
-    ereport!(ERROR, PgSqlErrorCode::ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE, format!("cbor value out of range for {what}"));
+    range(what).raise()
 }
 
 /// Normalizes raw CBOR built by this module (duplicate keys keep the last, as jsonb does).
@@ -276,14 +276,54 @@ fn cbor_to_timestamptz(c: Cbor<'_>) -> TimestampWithTimeZone {
     value_to_timestamptz(&root!(c))
 }
 
+/// Why a value does not convert: the error a cast raises.
+pub struct ConvError(PgSqlErrorCode, String);
+
+impl ConvError {
+    pub fn raise(self) -> ! {
+        crate::error::fail(self.0, self.1)
+    }
+}
+
+fn not(what: &str) -> ConvError {
+    ConvError(PgSqlErrorCode::ERRCODE_INVALID_PARAMETER_VALUE, format!("cbor value is not {what}"))
+}
+
+fn range(what: &str) -> ConvError {
+    ConvError(PgSqlErrorCode::ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE, format!("cbor value out of range for {what}"))
+}
+
+/// A tag 0 or 1 date-time: tag 0's text, which the caller parses as `timestamptz`, or tag 1 as a timestamptz.
+pub enum TagTime<'a> {
+    Text(&'a str),
+    Time(TimestampWithTimeZone),
+}
+
+pub fn tag_time<'a>(v: &Value<'a>) -> Result<TagTime<'a>, ConvError> {
+    let Kind::Tag(t @ (0 | 1)) = v.kind().or_raise(Source::Stored) else { return Err(not("a date-time (tag 0 or 1)")) };
+    let micros: i64 = match (t, v.tag_content().or_raise(Source::Stored).kind().or_raise(Source::Stored)) {
+        (0, Kind::Text(s)) => return Ok(TagTime::Text(s)),
+        (1, Kind::Unsigned(n)) => i64::try_from(n).ok().and_then(|s| (s - PG_EPOCH_SECS).checked_mul(1_000_000)).ok_or_else(|| range("timestamptz"))?,
+        (1, Kind::Negative(n)) => i64::try_from(n).ok().and_then(|n| (-1 - n - PG_EPOCH_SECS).checked_mul(1_000_000)).ok_or_else(|| range("timestamptz"))?,
+        (1, Kind::Float(f)) if f.is_finite() => {
+            let m = ((f - PG_EPOCH_SECS as f64) * 1e6).round();
+            if !(-9.2e18..9.2e18).contains(&m) {
+                return Err(range("timestamptz"));
+            }
+            m as i64
+        }
+        (1, Kind::Float(f)) if f.is_infinite() => if f > 0.0 { i64::MAX } else { i64::MIN },
+        _ => return Err(not("a date-time")),
+    };
+    TimestampWithTimeZone::try_from(micros).map(TagTime::Time).map_err(|_| range("timestamptz"))
+}
+
 /// Tag 0 (RFC 3339 text) or tag 1 (epoch seconds) as a timestamptz.
 pub fn value_to_timestamptz(v: &Value) -> TimestampWithTimeZone {
-    let Kind::Tag(t @ (0 | 1)) = v.kind().or_raise(Source::Stored) else { wrong_type("a date-time (tag 0 or 1)") };
-    let content = v.tag_content().or_raise(Source::Stored);
-    let k = content.kind().or_raise(Source::Stored);
-    let micros: i64 = match (t, k) {
-        (0, Kind::Text(s)) => {
-            let cs = std::ffi::CString::new(s).unwrap_or_else(|_| wrong_type("a date-time"));
+    match tag_time(v).unwrap_or_else(|e| e.raise()) {
+        TagTime::Time(t) => t,
+        TagTime::Text(s) => {
+            let cs = std::ffi::CString::new(s).unwrap_or_else(|_| not("a date-time").raise());
             // SAFETY: timestamptz_in parses a C string; errors are raised by PostgreSQL.
             let ts = unsafe {
                 pgrx::fcinfo::direct_function_call::<TimestampWithTimeZone>(
@@ -291,52 +331,40 @@ pub fn value_to_timestamptz(v: &Value) -> TimestampWithTimeZone {
                     &[cs.as_c_str().into_datum(), pg_sys::InvalidOid.into_datum(), (-1i32).into_datum()],
                 )
             };
-            return ts.unwrap_or_else(|| wrong_type("a date-time"));
+            ts.unwrap_or_else(|| not("a date-time").raise())
         }
-        (1, Kind::Unsigned(n)) => i64::try_from(n).ok().and_then(|s| (s - PG_EPOCH_SECS).checked_mul(1_000_000)).unwrap_or_else(|| out_of_range("timestamptz")),
-        (1, Kind::Negative(n)) => i64::try_from(n).ok().and_then(|n| (-1 - n - PG_EPOCH_SECS).checked_mul(1_000_000)).unwrap_or_else(|| out_of_range("timestamptz")),
-        (1, Kind::Float(f)) if f.is_finite() => {
-            let m = ((f - PG_EPOCH_SECS as f64) * 1e6).round();
-            if !(-9.2e18..9.2e18).contains(&m) {
-                out_of_range("timestamptz");
-            }
-            m as i64
-        }
-        (1, Kind::Float(f)) if f.is_infinite() => if f > 0.0 { i64::MAX } else { i64::MIN },
-        _ => wrong_type("a date-time"),
-    };
-    TimestampWithTimeZone::try_from(micros).unwrap_or_else(|_| out_of_range("timestamptz"))
+    }
 }
 
 #[pg_cast(immutable, parallel_safe)]
 fn cbor_to_date(c: Cbor<'_>) -> Date {
-    value_to_date(&root!(c))
+    value_to_date(&root!(c)).unwrap_or_else(|e| e.raise())
 }
 
 /// Tag 100 (days since 1970-01-01) as a date.
-pub fn value_to_date(v: &Value) -> Date {
-    let Kind::Tag(100) = v.kind().or_raise(Source::Stored) else { wrong_type("a date (tag 100)") };
+pub fn value_to_date(v: &Value) -> Result<Date, ConvError> {
+    let Kind::Tag(100) = v.kind().or_raise(Source::Stored) else { return Err(not("a date (tag 100)")) };
     let days = match v.tag_content().or_raise(Source::Stored).kind().or_raise(Source::Stored) {
         Kind::Unsigned(n) => i64::try_from(n).unwrap_or(i64::MAX),
         Kind::Negative(n) => i64::try_from(n).map(|n| -1 - n).unwrap_or(i64::MIN),
         Kind::Float(f) if f.is_infinite() => if f > 0.0 { i64::from(i32::MAX) + PG_EPOCH_DAYS } else { i64::from(i32::MIN) + PG_EPOCH_DAYS },
-        _ => wrong_type("a date"),
+        _ => return Err(not("a date")),
     };
-    let pg = i32::try_from(days - PG_EPOCH_DAYS).unwrap_or_else(|_| out_of_range("date"));
-    Date::try_from(pg).unwrap_or_else(|_| out_of_range("date"))
+    let pg = i32::try_from(days - PG_EPOCH_DAYS).map_err(|_| range("date"))?;
+    Date::try_from(pg).map_err(|_| range("date"))
 }
 
 #[pg_cast(immutable, parallel_safe)]
 fn cbor_to_uuid(c: Cbor<'_>) -> Uuid {
-    value_to_uuid(&root!(c))
+    value_to_uuid(&root!(c)).unwrap_or_else(|e| e.raise())
 }
 
 /// Tag 37 (16 bytes) as a uuid.
-pub fn value_to_uuid(v: &Value) -> Uuid {
-    let Kind::Tag(37) = v.kind().or_raise(Source::Stored) else { wrong_type("a UUID (tag 37)") };
+pub fn value_to_uuid(v: &Value) -> Result<Uuid, ConvError> {
+    let Kind::Tag(37) = v.kind().or_raise(Source::Stored) else { return Err(not("a UUID (tag 37)")) };
     match v.tag_content().or_raise(Source::Stored).kind().or_raise(Source::Stored) {
-        Kind::Bytes(b) => Uuid::from_slice(b).unwrap_or_else(|_| wrong_type("a 16-byte UUID")),
-        _ => wrong_type("a UUID"),
+        Kind::Bytes(b) => Uuid::from_slice(b).map_err(|_| not("a 16-byte UUID")),
+        _ => Err(not("a UUID")),
     }
 }
 

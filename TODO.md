@@ -47,7 +47,7 @@ Notes from implementation:
 - [x] Builders and aggregates (`cbor_build_*`, `cbor_object`, `cbor_agg*`, `cbor_object_agg*`).
 - [x] Set-returning functions (`cbor_each*`, `cbor_array_elements*`, `cbor_object_keys`) in value-per-call mode.
 - [x] `cbor_populate_record*`, `cbor_to_record*`.
-- [ ] `cbor_populate_record_valid` (needs soft input errors, PG 16+; decide behaviour on PG 15).
+- [x] `cbor_populate_record_valid` on PG 17+ (PG 16 lacks soft domain checks; decided 2026-11-19). Along the way `cbor_populate_record` now follows jsonb: domain constraints on array/composite/NULL values, NULL checks of absent columns, an error for non-map input, multi-dimensional arrays.
 - [x] Modifying functions (`cbor_set`, `cbor_set_lax`, `cbor_insert`, `cbor_strip_nulls`), `cbor_pretty`, `cbor_typeof`, `cbor_array_length`, `cbor_extract_path*`.
 - [x] CBOR-specific functions (§8).
 - [x] Subscripting handler.
