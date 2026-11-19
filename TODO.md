@@ -79,7 +79,7 @@ Notes from implementation:
 
 ## Phase 3: path queries
 
-Decided 2026-11-19 (design §8 Path queries, ADR-0008). Open: design §12 (recursion in the evaluator, type of arithmetic results).
+Decided 2026-11-19 (design §8 Path queries, ADR-0008).
 
 - [x] Decode the compiled `jsonpath` (core `jsonpath`, iterative, version check, nesting cap of 256 items) and PostgreSQL `numeric` literals (core `decimal`). `jsonpath_decode` suite: every literal of PostgreSQL's jsonpath tests that parses on the running version decodes, prints (debug-only `postbor_jsonpath_print`) and reads back to the same path, on PG 15–18; fuzz target `jsonpath`.
 - [x] Differential harness: `tests/jsonpath/extract_cases.py` turns PostgreSQL's `jsonb_jsonpath.sql` (823 cases on PG 18) into a suite that runs each statement on jsonb and on a cbor copy, compares rows as jsonb (an error on both sides is equal) and prints only differences. It joins the regression suites with the evaluator.

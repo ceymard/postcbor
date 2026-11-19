@@ -286,6 +286,7 @@ Queries:
   - Tags 2–5 are numbers; tags 0 and 1 are datetimes; other tags are transparent (the path sees their content).
   - Map keys that are not text: `.key` matches only text keys; `.*` and `.keyvalue()` visit every entry, and `.keyvalue()` gives the key as its CBOR value.
   - `undefined` and simple values keep their own types (`.type()` is `"undefined"`, `"simple"`), unequal to `null`.
+- **Arithmetic** is decimal, as in SQL/JSON, and runs PostgreSQL's `numeric` functions, so results and scales match jsonb's. A result becomes an integer (a bignum if large) when it is whole, else a decimal fraction (tag 4) keeping its scale: `2 * 2.5` is `5.0`, `4([-1, 50])`.
 - **Regex and datetimes**: `like_regex` runs PostgreSQL's regex engine; the datetime methods use PostgreSQL's datetime parsing.
 - **GIN**: `@?` and `@@` use `cbor_ops` and `cbor_path_ops` for paths made of key accessors and equality with constants, as jsonb's classes do.
 
@@ -406,7 +407,7 @@ Cargo workspace, crates fetched from crates.io:
 
 Core rules:
 - **No `powi`/`powf`** or other float functions without exact results: only basic IEEE operations and bit-level construction (`float::pow2`). Miri caught `powi` giving different results.
-- **No recursion.** Every walk keeps an explicit stack, limited by `max_depth`.
+- **No recursion.** Every walk keeps an explicit stack, limited by `max_depth`. One exception: the jsonpath evaluator recurses over the path expression, whose nesting is capped at 256 items when it is decoded; its descent into the document (`.**`, lax unwrapping) still uses explicit stacks.
 - **Checked arithmetic** for every offset and length, and `overflow-checks = true` in the release profile.
 - **Fallible allocation** (`try_reserve`) for any buffer whose size comes from the input. The Rust allocator is `malloc`, and an allocation failure that isn't handled would abort the backend.
 - **A declared length is never trusted for allocation.** It is first checked against the bytes remaining.
@@ -440,7 +441,4 @@ Approved: `pgrx` (and its dependency tree); for fuzzing only, `libfuzzer-sys` an
 
 ## 12. Open decisions
 
-Ask the user before implementing what depends on them.
-
-1. **Recursion in the path evaluator.** The core never recurses (§9). A jsonpath evaluator is naturally recursive over the path expression (filters, arithmetic and comparisons contain sub-paths). Options: an explicit-stack interpreter, or recursion over the path expression only, with the nesting capped by a fixed constant when the path is decoded, while descent into the document (`.**`, lax unwrapping) stays on explicit stacks.
-2. **Type of arithmetic results.** SQL/JSON arithmetic is decimal. A result such as `$.a + 1` or `$.a * 2.5` must become a CBOR item: an integer when it is whole, else a decimal fraction (tag 4), or a float when an operand was a float.
+None at the moment. Ask the user before implementing anything that depends on a new one.
