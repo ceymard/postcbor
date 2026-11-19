@@ -167,27 +167,40 @@ fn cbor_exists_all(doc: Cbor<'_>, keys: Array<'_, &str>) -> bool {
     keys.iter().flatten().all(|k| ops::exists_text(&v, k).or_raise(Source::Stored))
 }
 
-#[pg_extern(immutable, strict, parallel_safe)]
+/// `?#`: `?` with a key of any type (ADR-0006: a distinct symbol, so untyped literals are not captured).
+#[pg_operator(immutable, strict, parallel_safe, name = "cbor_has")]
+#[opname(?#)]
+#[restrict(matchingsel)]
+#[join(matchingjoinsel)]
 fn cbor_has(doc: Cbor<'_>, key: Cbor<'_>) -> bool {
-    let kd = parse_datum(key);
-    let k = Value::root(&kd);
-    ops::exists_encoded(&root!(doc), k.bytes().or_raise(Source::Stored)).or_raise(Source::Stored)
+    ops::exists_encoded(&root!(doc), root!(key).bytes().or_raise(Source::Stored)).or_raise(Source::Stored)
 }
 
-fn keys_of<'a>(keys: &Value<'a>) -> Vec<Value<'a>> {
-    keys.array_iter().or_raise(Source::Stored).map(|k| k.or_raise(Source::Stored)).collect()
+/// Each element of the `keys` array checked with `?#`; a non-array `keys` has no elements.
+fn has_keys(doc: Cbor<'_>, keys: Cbor<'_>, all: bool) -> bool {
+    let (d, kd) = (parse_datum(doc), parse_datum(keys));
+    let v = Value::root(&d);
+    let mut it = Value::root(&kd)
+        .array_iter()
+        .or_raise(Source::Stored)
+        .map(|k| ops::exists_encoded(&v, k.or_raise(Source::Stored).bytes().or_raise(Source::Stored)).or_raise(Source::Stored));
+    if all { it.all(|x| x) } else { it.any(|x| x) }
 }
 
-#[pg_extern(immutable, strict, parallel_safe)]
+/// `?#|`: any of the keys in a CBOR array, of any type.
+#[pg_operator(immutable, strict, parallel_safe, name = "cbor_has_any")]
+#[opname(?#|)]
+#[restrict(matchingsel)]
+#[join(matchingjoinsel)]
 fn cbor_has_any(doc: Cbor<'_>, keys: Cbor<'_>) -> bool {
-    let d = parse_datum(doc);
-    let v = Value::root(&d);
-    keys_of(&root!(keys)).iter().any(|k| ops::exists_encoded(&v, k.bytes().or_raise(Source::Stored)).or_raise(Source::Stored))
+    has_keys(doc, keys, false)
 }
 
-#[pg_extern(immutable, strict, parallel_safe)]
+/// `?#&`: all of the keys in a CBOR array, of any type.
+#[pg_operator(immutable, strict, parallel_safe, name = "cbor_has_all")]
+#[opname(?#&)]
+#[restrict(matchingsel)]
+#[join(matchingjoinsel)]
 fn cbor_has_all(doc: Cbor<'_>, keys: Cbor<'_>) -> bool {
-    let d = parse_datum(doc);
-    let v = Value::root(&d);
-    keys_of(&root!(keys)).iter().all(|k| ops::exists_encoded(&v, k.bytes().or_raise(Source::Stored)).or_raise(Source::Stored))
+    has_keys(doc, keys, true)
 }

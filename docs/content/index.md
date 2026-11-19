@@ -49,12 +49,13 @@ Values are stored in one canonical form: map keys sorted, shortest integers and 
 | `#>` `#>>` | `doc #> '{a,0,b}'` | Path of text keys and indexes |
 | `@>` `<@` | `doc @> '{"tags": ["x"]}'` | Containment |
 | `?` `?\|` `?&` | `doc ? 'a'` | Key (or string element) exists |
+| `?#` `?#\|` `?#&` | `cwt ?# '1'`, `doc ?#\| '[1, h''ff'']'` | Key (or element) of any type exists; the right side is CBOR (a key, or an array of keys) |
 | `\|\|` | `a \|\| b` | Merge maps, concatenate arrays |
 | `-` `#-` | `doc - 'a'`, `doc - 0`, `doc #- '{a,b}'` | Delete |
 | `=` `<` … | | Equality, ordering, btree and hash indexes |
 | `[…]` | `doc['a'][0]`, `SET doc['a'] = '1'` | Subscripting |
 
-Integer keys address arrays by position and maps by integer key, so `cwt -> 1` reads key 1 of a CWT claims map. For keys of other types and typed paths use the functions: `cbor_get(doc, key)`, `cbor_get_path(doc, '[1, "a", h''ff'']')`, `cbor_has`, `cbor_delete`, `cbor_set_path`, ….
+Integer keys address arrays by position and maps by integer key, so `cwt -> 1` reads key 1 of a CWT claims map. For keys of other types and typed paths use the functions: `cbor_get(doc, key)`, `cbor_get_path(doc, '[1, "a", h''ff'']')`, `cbor_has` (also `?#`), `cbor_delete`, `cbor_set_path`, ….
 
 ## Functions
 

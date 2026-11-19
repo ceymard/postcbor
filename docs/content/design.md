@@ -5,7 +5,7 @@ This is the reference specification. Terms are defined in `CONTEXT.md`, and the 
 ## 1. Goals and scope
 
 - A `cbor` type that does for CBOR what `jsonb` does for JSON: the same operators, the same functions (named `cbor_*` instead of `jsonb_*`), and the same index support, extended to the full CBOR data model.
-- Extension name `postbor`, type name `cbor`. Operator symbols are the same as jsonb's.
+- Extension name `postbor`, type name `cbor`. Operator symbols are the same as jsonb's, plus `?#`, `?#|` and `?#&` for keys of any type.
 - PostgreSQL 15–18.
 - Install with `make && make install` (a wrapper around `cargo pgrx install`). Pre-built packages are out of scope for now.
 
@@ -226,6 +226,8 @@ The property tests in section 10 check antisymmetry, transitivity, and agreement
 | `@>`, `<@` | `cbor` | `bool` | Containment, jsonb semantics. Tags: same number and the content contains, except decimal fractions (tag 4) and bigfloats (tag 5), which are numbers and must be equal |
 | `?` | `text` | `bool` | Map key exists, or a top-level array element is that text string |
 | `?\|`, `?&` | `text[]` | `bool` | Any / all |
+| `?#` | `cbor` | `bool` | `?` with a key of any type (`cbor_has`) |
+| `?#\|`, `?#&` | `cbor` (an array of keys) | `bool` | Any / all, keys of any type (`cbor_has_any`, `cbor_has_all`) |
 | `\|\|` | `cbor` | `cbor` | jsonb concatenation semantics |
 | `-` | `text`, `text[]`, `int`, `bytea` | `cbor` | Delete a key, or delete an element (`int`: by index) |
 | `#-` | `text[]` | `cbor` | Delete at path |
@@ -234,7 +236,7 @@ The property tests in section 10 check antisymmetry, transitivity, and agreement
 
 Out-of-range indexes and missing keys return NULL, as in jsonb.
 
-**Why keys of any type and typed paths are not operators.** Tested on PG 18: once an operator `(cbor, cbor)` exists, an untyped literal on the right is read as `cbor`. `doc -> 'a'` then fails as invalid EDN, and `doc -> '1'` silently looks up integer key 1. PostgreSQL first tries the left operand's type for an unknown literal. A separate key type does not help for paths either: `#> '{a}'` with both `text[]` and another type on the right is rejected as "operator is not unique". Only types that an untyped literal never resolves to are overloaded on operators (`int`, `bytea`, `text`, `text[]`). Keys of any type and typed paths go through functions with their own names (below). 
+**Why keys of any type and typed paths are not operators.** Tested on PG 18: once an operator `(cbor, cbor)` exists, an untyped literal on the right is read as `cbor`. `doc -> 'a'` then fails as invalid EDN, and `doc -> '1'` silently looks up integer key 1. PostgreSQL first tries the left operand's type for an unknown literal. A separate key type does not help for paths either: `#> '{a}'` with both `text[]` and another type on the right is rejected as "operator is not unique". Only types that an untyped literal never resolves to are overloaded on operators (`int`, `bytea`, `text`, `text[]`). Keys of any type and typed paths go through functions with their own names (below). The existence checks also get operators with their own symbols, `?#`, `?#|` and `?#&`, so that GIN indexes can serve them: a symbol with a single `(cbor, cbor)` definition captures no other operator's literals. 
 
 Typed-key functions:
 
@@ -248,7 +250,7 @@ Typed-key functions:
 
 These use different names rather than overloads because function overloads `(cbor, text[])` and `(cbor, cbor)` are equally ambiguous for an untyped literal.
 
-Selectivity estimators: `matchingsel`/`matchingjoinsel` for `@> <@ ? ?| ?&`; `eqsel`/`scalarltsel` etc. for comparisons.
+Selectivity estimators: `matchingsel`/`matchingjoinsel` for `@> <@ ? ?| ?& ?# ?#| ?#&`; `eqsel`/`scalarltsel` etc. for comparisons.
 
 Operator classes: btree `cbor_ops` (default) and hash `cbor_ops` (default, with an extended hash function). GIN classes come in phase 2.
 

@@ -69,6 +69,13 @@ SELECT cbor_has('{1: 2}', '1'), cbor_has_any('{1: 2}', '[3, 1]'), cbor_has_all('
  t        | t            | f
 (1 row)
 
+-- Same checks as operators: the right side is CBOR, so untyped literals are keys of any type.
+SELECT '{1: 2, h''ff'': 3}'::cbor ?# '1', '{1: 2}'::cbor ?# '"1"', '[1, "a"]'::cbor ?# '"a"', '{1: 2}'::cbor ?#| '[3, 1]', '{1: 2}'::cbor ?#& '[3, 1]', '{1: 2, 3: 4}'::cbor ?#& '[3, 1]';
+ ?column? | ?column? | ?column? | ?column? | ?column? | ?column? 
+----------+----------+----------+----------+----------+----------
+ t        | f        | t        | t        | f        | t
+(1 row)
+
 -- Building new values.
 SELECT '{"a": 1, "c": 3}'::cbor || '{"b": 2, "a": 9}', '[1]'::cbor || '2', '1'::cbor || '[2]';
          ?column?         | ?column? | ?column? 

@@ -14,6 +14,8 @@ SELECT '{"a": 1, "b": [1, 2, {"c": 3}]}'::cbor @> '{"b": [{"c": 3}]}', '[1, 2]':
 SELECT '258([1, 2, 3])'::cbor @> '258([3])', '1(5)'::cbor @> '5', '4([-2, 150])'::cbor @> '4([-2, 150])', '4([-2, 150])'::cbor @> '4([150, -2])', '5([-2, 150])'::cbor @> '5([-2])';
 SELECT '{"a": 1}'::cbor ? 'a', '["a", "b"]'::cbor ? 'b', '{"a": 1}'::cbor ?| '{x,a}', '{"a": 1}'::cbor ?& '{x,a}';
 SELECT cbor_has('{1: 2}', '1'), cbor_has_any('{1: 2}', '[3, 1]'), cbor_has_all('{1: 2}', '[3, 1]');
+-- Same checks as operators: the right side is CBOR, so untyped literals are keys of any type.
+SELECT '{1: 2, h''ff'': 3}'::cbor ?# '1', '{1: 2}'::cbor ?# '"1"', '[1, "a"]'::cbor ?# '"a"', '{1: 2}'::cbor ?#| '[3, 1]', '{1: 2}'::cbor ?#& '[3, 1]', '{1: 2, 3: 4}'::cbor ?#& '[3, 1]';
 -- Building new values.
 SELECT '{"a": 1, "c": 3}'::cbor || '{"b": 2, "a": 9}', '[1]'::cbor || '2', '1'::cbor || '[2]';
 SELECT '{"a": 1, "b": 2}'::cbor - 'a', '["a", "b", "a"]'::cbor - 'a', '{"a": 1, "b": 2}'::cbor - '{a,b}'::text[], '[1, 2, 3]'::cbor - 1, '{1: 2, 3: 4}'::cbor - 3;
