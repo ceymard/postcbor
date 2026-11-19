@@ -87,6 +87,7 @@ Decided 2026-11-19 (design §8 Path queries, ADR-0008).
 - [ ] Datetime methods and `_tz` behaviour (the functions exist; datetime methods raise "not supported").
 - [ ] Decimal fraction results show as `[exponent, mantissa]` after `::jsonb` (question for the user).
 - [ ] `.keyvalue()` ids differ from jsonb's except for objects at the top of the document (document in design §8).
-- [ ] Core unit tests for the evaluator (hand-built paths, Miri), and a stack test with a path at the 256-item cap.
-- [ ] Check the differential suite on PG 15–17.
+- [x] Core unit tests for the evaluator (hand-built paths, Miri), fuzzing of evaluation, and regression tests at the 256-item cap (`jsonpath` suite).
+- [x] Differential suite on PG 15–17: PG 17 matches PG 18; PG 15 and 16 (fewer jsonpath features) have their own expected output (`jsonpath_diff_1.out`).
+- [ ] Cache the decoded path per call site (design §8); today each call decodes it. Measure with the benchmarks first.
 - [ ] GIN support for `@?` / `@@`.
