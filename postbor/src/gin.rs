@@ -4,6 +4,8 @@
 use pgrx::pg_sys;
 use pgrx::prelude::*;
 use postbor_core::gin::{self, OpsEntry, Role};
+use postbor_core::jsonpath::Path;
+use postbor_core::jsonpath::gin::{Op, Tri};
 use postbor_core::value::Value;
 use postbor_core::{OutBuf, Result, ops};
 
@@ -19,6 +21,48 @@ const EXISTS_ALL: i16 = 11;
 const HAS: i16 = 12;
 const HAS_ANY: i16 = 13;
 const HAS_ALL: i16 = 14;
+// jsonb's numbers for `@?` and `@@`.
+const PATH_EXISTS: i16 = 15;
+const PATH_MATCH: i16 = 16;
+
+/// The query program of a jsonpath strategy, kept in `extra_data[0]` from extractQuery to consistent: its length,
+/// then one word per step.
+fn encode_program(program: &[Op]) -> *mut u8 {
+    let mut buf = PallocBuf::raw(4 * (program.len() + 1));
+    let mut word = |w: u32| buf.write_bytes(&w.to_ne_bytes()).or_raise(Source::Stored);
+    word(program.len() as u32);
+    for op in program {
+        word(match *op {
+            Op::Entry(i) => i,
+            Op::And(n) => (1 << 30) | n,
+            Op::Or(n) => (2 << 30) | n,
+        });
+    }
+    buf.into_ptr()
+}
+
+fn decode_program(p: *const u8) -> Vec<Op> {
+    // SAFETY: `p` is a block written by encode_program, which palloc aligns for u32.
+    unsafe {
+        let n = p.cast::<u32>().read() as usize;
+        (1..=n)
+            .map(|i| {
+                let w = p.cast::<u32>().add(i).read();
+                match w >> 30 {
+                    0 => Op::Entry(w),
+                    1 => Op::And(w & 0x3fff_ffff),
+                    _ => Op::Or(w & 0x3fff_ffff),
+                }
+            })
+            .collect()
+    }
+}
+
+/// The program of a jsonpath strategy, from consistent's `extra_data` (argument 4).
+fn program_arg(fcinfo: pg_sys::FunctionCallInfo) -> Vec<Op> {
+    // SAFETY: for the jsonpath strategies with keys, extractQuery stored the program in extra_data[0].
+    decode_program(unsafe { *ptr_arg::<*const u8>(fcinfo, 4) })
+}
 
 /// `cbor_ops` entries: varlenas back to back in one block, each 4-byte aligned, then an array of pointers to them.
 struct OpsOut {
@@ -107,7 +151,9 @@ fn set_search_all(fcinfo: pg_sys::FunctionCallInfo) {
 fn cbor_gin_extract_value(fcinfo: pg_sys::FunctionCallInfo) -> InternalOut {
     let c = cbor_arg(fcinfo, 0);
     let d = parse_datum(c);
-    ops_of_value(&Value::root(&d), c.0.len() * 2).finish(ptr_arg(fcinfo, 1))
+    let mut out = OpsOut::new(c.0.len() * 2);
+    gin::index_entries(&Value::root(&d), |e| out.push(e)).or_raise(Source::Stored);
+    out.finish(ptr_arg(fcinfo, 1))
 }
 
 /// extractValue for `cbor_path_ops`.
@@ -172,6 +218,24 @@ fn cbor_gin_extract_query(fcinfo: pg_sys::FunctionCallInfo) -> InternalOut {
                 set_search_all(fcinfo);
             }
         }
+        s @ (PATH_EXISTS | PATH_MATCH) => {
+            // SAFETY: for `@?` and `@@` the query is a non-null jsonpath datum.
+            let jp = unsafe { crate::datum::JsonPathArg::from_datum(arg(fcinfo, 0), false) }.map(|j| j.0).unwrap_or_default();
+            let path = Path::decode(jp).or_raise(Source::Stored);
+            if let Some(q) = postbor_core::jsonpath::gin::query(&path, s == PATH_EXISTS).or_raise(Source::Stored) {
+                for (role, bytes) in &q.entries {
+                    out.push(OpsEntry::new(*role, bytes)).or_raise(Source::Stored);
+                }
+                let extra = PallocBuf::raw(q.entries.len() * size_of::<*mut u8>());
+                let extra = extra.into_ptr().cast::<*mut u8>();
+                // SAFETY: GIN passes a pointer for the extra-data array, which we allocate with one slot per entry.
+                unsafe {
+                    core::ptr::write_bytes(extra, 0, q.entries.len());
+                    *extra = encode_program(&q.program);
+                    *ptr_arg::<*mut *mut u8>(fcinfo, 4) = extra;
+                }
+            }
+        }
         s => crate::error::fail(PgSqlErrorCode::ERRCODE_INTERNAL_ERROR, format!("unrecognized strategy number: {s}")),
     }
     if out.offsets.is_empty() && !matches!(strategy(fcinfo, 2), EXISTS_ANY | HAS_ANY) {
@@ -212,7 +276,12 @@ fn cbor_gin_consistent(fcinfo: pg_sys::FunctionCallInfo) -> bool {
         if n == 0 { &[][..] } else { core::slice::from_raw_parts(ptr_arg::<bool>(fcinfo, 0), n) }
     };
     // With no keys (search mode ALL) every row is a candidate.
-    n == 0 || if is_any(strategy(fcinfo, 1)) { check.iter().any(|&c| c) } else { check.iter().all(|&c| c) }
+    match strategy(fcinfo, 1) {
+        _ if n == 0 => true,
+        PATH_EXISTS | PATH_MATCH => postbor_core::jsonpath::gin::run(&program_arg(fcinfo), |i| if check.get(i).copied().unwrap_or(true) { Tri::True } else { Tri::False }) != Tri::False,
+        s if is_any(s) => check.iter().any(|&c| c),
+        _ => check.iter().all(|&c| c),
+    }
 }
 
 /// triConsistent, both classes: `(internal check, int2 strategy, query, int4 nkeys, internal extra,
@@ -223,7 +292,19 @@ fn cbor_gin_triconsistent(fcinfo: pg_sys::FunctionCallInfo) -> i8 {
     // SAFETY: GIN passes `nkeys` ternary check values.
     let check = if n == 0 { &[][..] } else { unsafe { core::slice::from_raw_parts(ptr_arg::<i8>(fcinfo, 0), n) } };
     let (f, maybe) = (pg_sys::GIN_FALSE as i8, pg_sys::GIN_MAYBE as i8);
-    let possible = n == 0 || if is_any(strategy(fcinfo, 1)) { check.iter().any(|&c| c != f) } else { check.iter().all(|&c| c != f) };
+    let possible = match strategy(fcinfo, 1) {
+        _ if n == 0 => true,
+        PATH_EXISTS | PATH_MATCH => {
+            let tri = |i: usize| match check.get(i).copied() {
+                Some(c) if c == f => Tri::False,
+                Some(c) if c == pg_sys::GIN_TRUE as i8 => Tri::True,
+                _ => Tri::Maybe,
+            };
+            postbor_core::jsonpath::gin::run(&program_arg(fcinfo), tri) != Tri::False
+        }
+        s if is_any(s) => check.iter().any(|&c| c != f),
+        _ => check.iter().all(|&c| c != f),
+    };
     if possible { maybe } else { f }
 }
 
@@ -250,6 +331,8 @@ CREATE OPERATOR CLASS cbor_ops DEFAULT FOR TYPE cbor USING gin AS
     OPERATOR 12 ?#(cbor, cbor),
     OPERATOR 13 ?#|(cbor, cbor),
     OPERATOR 14 ?#&(cbor, cbor),
+    OPERATOR 15 @?(cbor, jsonpath),
+    OPERATOR 16 @@(cbor, jsonpath),
     FUNCTION 1 byteacmp(bytea, bytea),
     FUNCTION 2 cbor_gin_extract_value(cbor, internal, internal),
     FUNCTION 3 cbor_gin_extract_query(cbor, internal, int2, internal, internal, internal, internal),
@@ -275,6 +358,8 @@ CREATE OPERATOR CLASS cbor_path_ops FOR TYPE cbor USING gin AS
         access::cbor_exists_all,
         access::cbor_has,
         access::cbor_has_any,
-        access::cbor_has_all
+        access::cbor_has_all,
+        path::cbor_path_exists_opr,
+        path::cbor_path_match_opr
     ],
 );

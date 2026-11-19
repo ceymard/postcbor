@@ -61,8 +61,9 @@ impl OpsEntry<'_> {
 pub enum Item<'a> {
     /// A map key, whole, whatever its type.
     Key(&'a [u8]),
-    /// An atomic item (see [`atomic_end`]) with its role and the hash state of the path leading to it.
-    Leaf { role: Role, bytes: &'a [u8], path: u32 },
+    /// An atomic item (see [`atomic_end`]) at body offset `pos`, with its role and the hash state of the path leading
+    /// to it.
+    Leaf { role: Role, pos: usize, bytes: &'a [u8], path: u32 },
 }
 
 const FNV_BASIS: u32 = 0x811c_9dc5;
@@ -122,7 +123,7 @@ pub fn walk<'a>(v: &Value<'a>, mut f: impl FnMut(Item<'a>) -> Result<()>) -> Res
         ticker.tick();
         let item = Value { d: v.d, pos };
         if let Some(end) = atomic_end(&item)? {
-            f(Item::Leaf { role, bytes: item.bytes()?, path })?;
+            f(Item::Leaf { role, pos: item.pos, bytes: item.bytes()?, path })?;
             pos = end;
         } else {
             // Tags that containment looks into are path steps; then a container.
@@ -163,11 +164,26 @@ pub fn walk<'a>(v: &Value<'a>, mut f: impl FnMut(Item<'a>) -> Result<()>) -> Res
     }
 }
 
-/// `cbor_ops` entries of a value, possibly repeated (GIN removes duplicates).
+/// `cbor_ops` entries of a containment query, possibly repeated (GIN removes duplicates).
 pub fn ops_entries<'a>(v: &Value<'a>, mut f: impl FnMut(OpsEntry<'_>) -> Result<()>) -> Result<()> {
     walk(v, |item| match item {
         Item::Key(k) => f(OpsEntry::new(Role::Key, k)),
         Item::Leaf { role, bytes, .. } => f(OpsEntry::new(role, bytes)),
+    })
+}
+
+/// `cbor_ops` entries of a stored value: those of [`ops_entries`], and for each leaf whose jsonpath equality form
+/// differs from its encoding (a float, a decimal fraction, a tagged scalar), that form too, for `@?` and `@@`.
+pub fn index_entries<'a>(v: &Value<'a>, mut f: impl FnMut(OpsEntry<'_>) -> Result<()>) -> Result<()> {
+    walk(v, |item| match item {
+        Item::Key(k) => f(OpsEntry::new(Role::Key, k)),
+        Item::Leaf { role, pos, bytes, .. } => {
+            f(OpsEntry::new(role, bytes))?;
+            match crate::jsonpath::gin::equality_form(Value { d: v.d, pos })? {
+                Some(form) if form != bytes => f(OpsEntry::new(role, &form)),
+                _ => Ok(()),
+            }
+        }
     })
 }
 

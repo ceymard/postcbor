@@ -1,10 +1,13 @@
 #![no_main]
 //! Arbitrary bytes as a compiled jsonpath: refused cleanly, or decoded into a path that prints and evaluates over
-//! sample documents without panicking.
+//! sample documents without panicking. Whenever `@?` or `@@` holds for a document, the GIN query must not rule out
+//! that document's index entries.
 use libfuzzer_sys::fuzz_target;
 use postbor_core::ctx::PlainCtx;
 use postbor_core::datum::Datum;
-use postbor_core::jsonpath::eval::{PlainHost, Seq, execute, write_array};
+use postbor_core::gin::{OpsEntry, index_entries};
+use postbor_core::jsonpath::eval::{PlainHost, Res, Seq, bool_or_null, execute, write_array};
+use postbor_core::jsonpath::gin::{Tri, query, run};
 use postbor_core::jsonpath::{Path, print};
 use postbor_core::value::Value;
 
@@ -33,6 +36,28 @@ fuzz_target!(|data: &[u8]| {
                 write_array(&found, &mut Vec::new(), 1000).unwrap();
             }
             let _ = execute(&p, Value::root(&d), None, throw, false, &mut PlainHost, None);
+        }
+        // The operators: no vars, silent.
+        let exists = execute(&p, Value::root(&d), None, false, false, &mut PlainHost, None).ok() == Some(Res::Ok);
+        let mut found = Seq::default();
+        let matched = execute(&p, Value::root(&d), None, false, false, &mut PlainHost, Some(&mut found)).is_ok()
+            && matches!(found.single().map(bool_or_null), Some(Ok(Some(Some(true)))));
+        let mut index = Vec::new();
+        index_entries(&Value::root(&d), |e| {
+            let (a, b) = e.parts();
+            index.push([a, b].concat());
+            Ok(())
+        })
+        .unwrap();
+        for (holds, ex) in [(exists, true), (matched, false)] {
+            if let (true, Some(q)) = (holds, query(&p, ex).unwrap()) {
+                let has = |i: usize| {
+                    let e = OpsEntry::new(q.entries[i].0, &q.entries[i].1);
+                    let (a, b) = e.parts();
+                    if index.contains(&[a, b].concat()) { Tri::True } else { Tri::False }
+                };
+                assert_ne!(run(&q.program, has), Tri::False, "{} on {text}", print::print(&p));
+            }
         }
     }
 });

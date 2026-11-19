@@ -3,7 +3,10 @@
 //! item, then type-specific fields; child offsets are relative to the item's start and 0 means "absent".
 
 pub mod eval;
+pub mod gin;
 pub mod print;
+#[cfg(test)]
+pub(crate) mod test_path;
 
 use crate::cursor::Cursor;
 use crate::decimal::{Dec, Num};

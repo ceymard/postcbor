@@ -260,20 +260,22 @@ Two operator classes, as for jsonb. Both are lossy: every match is rechecked aga
 
 | Class | Operators | Entries | Storage |
 |---|---|---|---|
-| `cbor_ops` (default) | `@>` `?` `?\|` `?&` `?#` `?#\|` `?#&` | One per map key and one per atomic item, without their position | `bytea` |
+| `cbor_ops` (default) | `@>` `?` `?\|` `?&` `?#` `?#\|` `?#&` `@?` `@@` | One per map key and one per atomic item, without their position, plus the path-equality form of items that differ from it | `bytea` |
 | `cbor_path_ops` | `@>` | One per atomic item: a hash of the path leading to it and of the item | `int4` |
 
 Both come from one walk over the value (core `gin`), in body order:
 - **Atomic item**: one that containment compares whole: a scalar, a tag whose content (through further tags) is atomic, or a decimal fraction or bigfloat (tags 4, 5). Arrays, maps and other tags around them are walked into.
 - **`cbor_ops` entry**: a role byte, then the item's deterministic encoding. Role 1 (key) for map keys, of any type and whole, and for array elements and the top-level value; role 2 for map values. Sharing the key role lets `?` find array elements, as jsonb does. An item whose encoding is 125 bytes or longer gets instead the role with bit 7 set and a 4-byte hash of the encoding.
 - **`cbor_path_ops` entry**: a 32-bit hash over the path steps and the item: each map key's encoding and each walked tag's number, with a marker byte per step kind. Arrays add no step, since array containment ignores positions; so `[1, 2] @> 1` holds for the index too. The hash is FNV-1a with a final mix.
-- Entries are on disk: changing the walk, the roles or the hashes requires a REINDEX.
+- **Path-equality entry** (`cbor_ops` only): for an atomic item whose jsonpath equality form differs from its encoding, a second entry with the same role holding that form: transparent tags removed, numbers in one form (an integer when whole, else a decimal fraction without trailing zeros), so `1`, `1.0` and `4([-1, 10])` share one. Items a path literal cannot equal (byte strings, `undefined`, simple values, datetimes, NaN, numbers without a `numeric` value) have none. Plain integers and untagged strings add nothing.
+- Entries are on disk: changing the walk, the roles, the equality form or the hashes requires a REINDEX. `cbor_ops` indexes built before path-equality entries existed must be rebuilt.
 
 Queries:
 - `@>`: the query value's own entries; the row must have all of them. A query with no entries (`{}`, `[]`, `{"a": {}}`) scans the whole index and rechecks every row.
 - `?`, `?|`, `?&`: the key-role entry of each text key. `?&` with no keys matches every row; `?|` with none matches no row.
 - `?#`, `?#|`, `?#&`: the key-role entry of each key. A key that is not atomic cannot be found among array elements through entries, so `?#` with such a key, or `?#|` with any such key, rechecks every row; `?#&` skips such keys.
-- Strategy numbers: 7 `@>`, 9 `?`, 10 `?|`, 11 `?&` (jsonb's), 12 `?#`, 13 `?#|`, 14 `?#&`.
+- `@?`, `@@` (`cbor_ops`): as jsonb, from each `accessors == literal` condition (accessors: `.key`, `.*`, `.**`, `[…]`, `[*]`, and filters on them): the key entries of its `.key` steps AND the literal's path-equality entry. The literal's role is the value role after a key step in strict mode, the key role after `[…]` or at the top, and either one in lax mode or after `.**`. `&&`, `||` and `!` combine conditions (NOT through De Morgan; `!` of an equality gives nothing); an AND keeps the side that has entries. A path with no such condition scans the whole index. `cbor_path_ops` has no path support: its hashes include tags, which paths look through.
+- Strategy numbers: 7 `@>`, 9 `?`, 10 `?|`, 11 `?&`, 15 `@?`, 16 `@@` (jsonb's), 12 `?#`, 13 `?#|`, 14 `?#&`.
 
 ### Path queries (phase 3)
 
@@ -290,7 +292,7 @@ Queries:
 - **NaN and ±Infinity** floats are numbers, ordered as `numeric` orders them: NaN equals itself and sorts above everything.
 - **`.keyvalue()` ids** are unique per object, as in jsonb, and equal to jsonb's for objects at the top of the document. jsonb derives the others from its own byte layout; ours come from positions in the CBOR value, so they differ.
 - **Regex and datetimes**: `like_regex` runs PostgreSQL's regex engine; the datetime methods use PostgreSQL's datetime parsing, casts and time zone rules (the `_tz` functions allow the casts that depend on the session time zone). A datetime result comes back as ISO 8601 text, as jsonb returns it. Tag 0 is a `timestamptz` when its text is RFC 3339 (shown with its own offset), tag 1 when its number of seconds is within `timestamptz`'s range; otherwise the tag is transparent.
-- **GIN**: `@?` and `@@` use `cbor_ops` and `cbor_path_ops` for paths made of key accessors and equality with constants, as jsonb's classes do.
+- **GIN**: `@?` and `@@` use `cbor_ops` for `accessors == literal` conditions (GIN indexes above); `cbor_path_ops` does not support them.
 
 ### Subscripting
 
@@ -400,7 +402,7 @@ Cargo workspace, crates fetched from crates.io:
   - `cmp`: ordering, and the input to hashing.
   - `ops`: lookups, paths, containment and `?` checks. `edit`: operations that build a new value (concatenation, deletion, set/insert, strip_nulls).
   - `json`: the decision logic for converting to and from JSON. Building and reading the actual jsonb values happens in the glue.
-  - `gin`: the walk over a value's keys and atomic items, and the GIN entries built from it.
+  - `gin`: the walk over a value's keys and atomic items, and the GIN entries built from it. `jsonpath::gin`: the entries and AND/OR program of a path query, and the path-equality form.
   - `jsonpath`: decoding PostgreSQL's compiled `jsonpath` (and a printer for tests), and the evaluator (`jsonpath::eval`), which calls a host trait for `numeric` arithmetic, input functions and regexes. `decimal`: exact decimals and jsonpath numbers, in and out of PostgreSQL's `numeric` binary form.
   - `ctx`, `out`, `error`: limits and interrupt checks, the output buffer trait, errors.
 - **`postbor/`**: the pgrx `cdylib`. It holds the SQL definitions, the conversions to and from PostgreSQL types, the settings, and turning core errors into `ereport` calls. `unsafe` is allowed only where raw PostgreSQL APIs are unavoidable: `datum` (varlena wrapper, `PallocBuf`), `io` (receive buffer, encoding conversion), `convert` (`to_cbor` over any type: arrays, composites, catalog lookups), `build` (`VARIADIC "any"` and aggregate states), `record` (row construction), `subscript`, `gin` (GIN support functions), and `path` (the evaluator's host: `numeric` functions, input functions, regexes). Each `unsafe` block carries a one-line comment stating its invariant.

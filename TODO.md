@@ -91,4 +91,4 @@ Decided 2026-11-19 (design §8 Path queries, ADR-0008).
 - [x] Differential suite on PG 15–17: PG 17 matches PG 18; PG 15 and 16 (fewer jsonpath features) have their own expected output (`jsonpath_diff_1.out`).
 - [x] Cache the decoded path per call site (`fn_extra`; set-returning functions decode once per call).
 - [ ] Path operators are 2–4× slower than jsonb's on small documents (PG 18 without assertions, 200,000 rows): `@@ '$.id < 1000'` 33 ms vs 10, `@? '$.addr ? (@.city == "c1")'` 37 vs 12, `@? '$.** ? (@ == 1)'` 256 vs 61. Evaluation alone (core, plain host): 30 ns for `1 < 1000`, 85 ns for `$.id < 1000`; the rest is the call itself (pgrx guard, detoasting, result list).
-- [ ] GIN support for `@?` / `@@`.
+- [x] GIN support for `@?` / `@@` in `cbor_ops` (path-equality entries; core `jsonpath::gin`, an explicit-stack port of jsonb's extraction). Never-miss property: core tests, the `gin` suite (25 path queries, sequential scan = index scan), and the jsonpath fuzz target.
