@@ -141,15 +141,16 @@ impl<'a> Path<'a> {
         }
         let data = payload.get(4..).ok_or_else(malformed)?;
         let mut items: Vec<Option<Item<'a>>> = vec![None];
-        let mut ids: std::collections::HashMap<usize, ItemId> = std::collections::HashMap::new();
-        ids.insert(0, 0);
+        // PostgreSQL writes a tree: an item referenced twice would escape the nesting cap.
+        let mut seen: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        seen.insert(0);
         let mut todo = vec![Todo { offset: 0, id: 0, depth: 1 }];
         while let Some(t) = todo.pop() {
             let mut c = Cursor::at(data, t.offset);
             let typ = c.byte().map_err(|_| malformed())?;
             c.align(4).map_err(|_| malformed())?;
             let next_rel = c.read_u32_ne().map_err(|_| malformed())? as i32;
-            // Child references: absolute offset → id, queued once.
+            // Child references: absolute offset → new id.
             let mut child = |rel: i32| -> Result<ItemId> {
                 let off = usize::try_from(rel).ok().filter(|&r| r > 0).and_then(|r| t.offset.checked_add(r)).ok_or_else(malformed)?;
                 if off >= data.len() {
@@ -158,12 +159,11 @@ impl<'a> Path<'a> {
                 if t.depth >= MAX_NESTING {
                     return Err(bad("jsonpath nests deeper than 256 items"));
                 }
-                if let Some(&id) = ids.get(&off) {
-                    return Ok(id);
+                if !seen.insert(off) {
+                    return Err(malformed());
                 }
                 let id = items.len();
                 items.push(None);
-                ids.insert(off, id);
                 todo.push(Todo { offset: off, id, depth: t.depth + 1 });
                 Ok(id)
             };
@@ -274,5 +274,55 @@ impl<'a> Path<'a> {
 
     pub fn item(&self, id: ItemId) -> &Item<'a> {
         &self.items[id]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn word(v: &mut Vec<u8>, x: i32) {
+        v.extend_from_slice(&x.to_ne_bytes());
+    }
+
+    /// A lax path: `n` nested `!(…)` around `null`.
+    fn nots(n: usize) -> Vec<u8> {
+        let mut v = Vec::new();
+        word(&mut v, (VERSION | LAX) as i32);
+        for _ in 0..n {
+            v.extend_from_slice(&[6, 0, 0, 0]);
+            word(&mut v, 0);
+            word(&mut v, 12); // the argument follows this item
+        }
+        v.extend_from_slice(&[0, 0, 0, 0]);
+        word(&mut v, 0);
+        v
+    }
+
+    #[test]
+    fn nesting_is_capped_at_256_items() {
+        assert_eq!(Path::decode(&nots(MAX_NESTING - 1)).unwrap().items.len(), MAX_NESTING);
+        assert!(Path::decode(&nots(MAX_NESTING)).is_err());
+    }
+
+    /// `null && null` whose operands are at the given offsets from the `&&` item.
+    fn and(left: i32, right: i32) -> Vec<u8> {
+        let mut v = Vec::new();
+        word(&mut v, (VERSION | LAX) as i32);
+        v.extend_from_slice(&[4, 0, 0, 0]);
+        word(&mut v, 0);
+        word(&mut v, left);
+        word(&mut v, right);
+        for _ in 0..2 {
+            v.extend_from_slice(&[0, 0, 0, 0]);
+            word(&mut v, 0);
+        }
+        v
+    }
+
+    #[test]
+    fn items_referenced_twice_are_refused() {
+        assert_eq!(Path::decode(&and(16, 24)).unwrap().items.len(), 3);
+        assert!(Path::decode(&and(16, 16)).is_err());
     }
 }
