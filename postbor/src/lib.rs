@@ -12,6 +12,7 @@ mod compare;
 mod convert;
 mod io;
 mod modify;
+mod path;
 mod record;
 mod settings;
 mod subscript;

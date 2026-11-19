@@ -81,7 +81,7 @@ Notes from implementation:
 
 Decided 2026-11-19 (design §8 Path queries, ADR-0008). Open: design §12 (recursion in the evaluator, type of arithmetic results).
 
-- [ ] Decode the compiled `jsonpath` (core, iterative, version check, nesting cap) and PostgreSQL `numeric` literals.
+- [x] Decode the compiled `jsonpath` (core `jsonpath`, iterative, version check, nesting cap of 256 items) and PostgreSQL `numeric` literals (core `decimal`). `jsonpath_decode` suite: every literal of PostgreSQL's jsonpath tests that parses on the running version decodes, prints (debug-only `postbor_jsonpath_print`) and reads back to the same path, on PG 15–18; fuzz target `jsonpath`.
 - [ ] Differential harness: PostgreSQL's `jsonb_jsonpath.sql` cases run against `cbor` and `jsonb`, printing mismatches only.
 - [ ] Evaluator, in slices: accessors with lax/strict (`@?`, `cbor_path_exists`, `cbor_path_query`); predicates and filters; arithmetic and item methods; `like_regex`, `vars`, `.keyvalue()`; `_tz` and datetime methods.
 - [ ] GIN support for `@?` / `@@`.

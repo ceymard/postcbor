@@ -98,6 +98,27 @@ impl<'a> Cursor<'a> {
         Ok(u32::from_le_bytes([s[0], s[1], s[2], s[3]]))
     }
 
+    /// Native-endian integers, for PostgreSQL's in-memory formats (`jsonpath`, `numeric`).
+    pub fn read_u32_ne(&mut self) -> Result<u32> {
+        let s = self.take(4)?;
+        Ok(u32::from_ne_bytes([s[0], s[1], s[2], s[3]]))
+    }
+
+    pub fn read_u16_ne(&mut self) -> Result<u16> {
+        let s = self.take(2)?;
+        Ok(u16::from_ne_bytes([s[0], s[1]]))
+    }
+
+    /// Moves forward to the next multiple of `n` from the start of the buffer.
+    pub fn align(&mut self, n: usize) -> Result<()> {
+        let to = self.pos.checked_next_multiple_of(n).ok_or_else(|| self.err(ErrorKind::Truncated))?;
+        if to > self.buf.len() {
+            return Err(self.err(ErrorKind::Truncated));
+        }
+        self.pos = to;
+        Ok(())
+    }
+
     fn uint_be(&mut self, n: u64) -> Result<u64> {
         Ok(self
             .take(n)?

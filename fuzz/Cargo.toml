@@ -46,3 +46,10 @@ path = "fuzz_targets/edit.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "jsonpath"
+path = "fuzz_targets/jsonpath.rs"
+test = false
+doc = false
+bench = false

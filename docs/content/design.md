@@ -279,7 +279,7 @@ Queries:
 
 `@?`, `@@` and `cbor_path_exists`, `cbor_path_match`, `cbor_path_query` (set-returning), `cbor_path_query_array`, `cbor_path_query_first`, each with `vars cbor` (a map) and `silent bool`, plus the `_tz` variants. The path argument is PostgreSQL's `jsonpath` ([ADR-0008](../adr/0008-path-queries-reuse-jsonpath.md)). Results must equal jsonb's for every value that converts to jsonb without loss: the reference is `jsonb_path_*(value::jsonb, …)`.
 
-- **Compiled path**: the `jsonpath` value's binary form is decoded in the core (format version 1, stable since PG 12; PG 17 appended the `.bigint()` … `.timestamp_tz()` items). Unknown versions and items are refused. The decoded path is cached per call site.
+- **Compiled path**: the `jsonpath` value's binary form is decoded in the core (format version 1, stable since PG 12; PG 17 appended the `.bigint()` … `.timestamp_tz()` items). Unknown versions and items are refused, and so are paths nesting deeper than 256 items (arguments and chained steps both count). The decoded path is cached per call site.
 - **Numbers**: inside path expressions, numbers compare by value, as in SQL/JSON: `1 == 1.0`, and bignums, decimal fractions and bigfloats are numbers. A float takes the value of its shortest decimal form, as when it is converted to jsonb. Containment and `=` stay typed.
 - **CBOR types jsonpath lacks**:
   - Byte strings: `.type()` is `"bytes"`; comparing them with other types is unknown, as jsonpath does for mismatched types.
@@ -398,6 +398,7 @@ Cargo workspace, crates fetched from crates.io:
   - `ops`: lookups, paths, containment and `?` checks. `edit`: operations that build a new value (concatenation, deletion, set/insert, strip_nulls).
   - `json`: the decision logic for converting to and from JSON. Building and reading the actual jsonb values happens in the glue.
   - `gin`: the walk over a value's keys and atomic items, and the GIN entries built from it.
+  - `jsonpath`: decoding PostgreSQL's compiled `jsonpath` (and a printer for tests). `decimal`: exact decimals, read from PostgreSQL `numeric`.
   - `ctx`, `out`, `error`: limits and interrupt checks, the output buffer trait, errors.
 - **`postbor/`**: the pgrx `cdylib`. It holds the SQL definitions, the conversions to and from PostgreSQL types, the settings, and turning core errors into `ereport` calls. `unsafe` is allowed only where raw PostgreSQL APIs are unavoidable: `datum` (varlena wrapper, `PallocBuf`), `io` (receive buffer, encoding conversion), `convert` (`to_cbor` over any type: arrays, composites, catalog lookups), `build` (`VARIADIC "any"` and aggregate states), `record` (row construction), `subscript`, and `gin` (GIN support functions). Each `unsafe` block carries a one-line comment stating its invariant.
 - **jsonb conversion** goes through JSON text: `cbor → jsonb` prints JSON with the core's `json` module and calls `jsonb_in`; `jsonb/json → cbor` reads `jsonb_out`/`json_out` text with the EDN parser (JSON is a subset of EDN). Replace with direct `JsonbValue` building only if benchmarks show it matters.

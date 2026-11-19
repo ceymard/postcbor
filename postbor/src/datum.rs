@@ -204,6 +204,7 @@ pub struct ByteaOut(pub VarlenaOut);
 sql_type!(TextOut, "text", TypeOrigin::External);
 bytes_arg!(TextArg, "text");
 bytes_arg!(ByteaArg, "bytea");
+bytes_arg!(JsonPathArg, "jsonpath");
 sql_type!(TextArray<'_>, "text[]", TypeOrigin::External);
 sql_type!(ByteaOut, "bytea", TypeOrigin::External);
 
