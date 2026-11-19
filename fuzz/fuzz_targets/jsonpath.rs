@@ -28,10 +28,10 @@ fuzz_target!(|data: &[u8]| {
         let d = Datum::parse(&d).unwrap();
         for throw in [false, true] {
             let mut found = Vec::new();
-            if execute(&p, Value::root(&d), Some(Value::root(&vars)), throw, &mut PlainHost, Some(&mut found)).is_ok() {
+            if execute(&p, Value::root(&d), Some(Value::root(&vars)), throw, false, &mut PlainHost, Some(&mut found)).is_ok() {
                 write_array(&found, &mut Vec::new(), 1000).unwrap();
             }
-            let _ = execute(&p, Value::root(&d), None, throw, &mut PlainHost, None);
+            let _ = execute(&p, Value::root(&d), None, throw, false, &mut PlainHost, None);
         }
     }
 });

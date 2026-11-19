@@ -57,7 +57,6 @@ fn method_text(m: Method) -> &'static str {
         Method::KeyValue => ".keyvalue()",
         Method::Bigint => ".bigint()",
         Method::Boolean => ".boolean()",
-        Method::Date => ".date()",
         Method::Integer => ".integer()",
         Method::Number => ".number()",
         Method::String => ".string()",
@@ -151,6 +150,7 @@ pub fn print(path: &Path) -> String {
             Kind::Datetime(m, arg) => {
                 parts.push(Task::Text(match m {
                     DatetimeMethod::Datetime => ".datetime(",
+                    DatetimeMethod::Date => ".date(",
                     DatetimeMethod::Time => ".time(",
                     DatetimeMethod::TimeTz => ".time_tz(",
                     DatetimeMethod::Timestamp => ".timestamp(",

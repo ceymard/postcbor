@@ -81,16 +81,16 @@ SELECT cbor_path_query('9223372036854775807', '$ + 1');
  9223372036854775808
 (1 row)
 
-SELECT cbor_path_query('1.0', '$.string()');
+SELECT cbor_path_query('1.0', '$ + 0');
  cbor_path_query 
 -----------------
- "1.0"
+ 4([-1, 10])
 (1 row)
 
-SELECT cbor_path_query('4([-2, 150])', '$.string()');
+SELECT cbor_path_query('4([-2, 150])', '$ + 0');
  cbor_path_query 
 -----------------
- "1.50"
+ 4([-2, 150])
 (1 row)
 
 -- Tags other than numbers are transparent; the result keeps its tag.

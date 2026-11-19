@@ -60,16 +60,16 @@ pub enum Method {
     KeyValue,
     Bigint,
     Boolean,
-    Date,
     Integer,
     Number,
     String,
 }
 
-/// Datetime methods with an optional template or precision argument.
+/// Datetime methods, with an optional template (`.datetime()`) or precision (time methods) argument.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DatetimeMethod {
     Datetime,
+    Date,
     Time,
     TimeTz,
     Timestamp,
@@ -251,7 +251,7 @@ impl<'a> Path<'a> {
                 }
                 43 => Kind::Method(M::Bigint),
                 44 => Kind::Method(M::Boolean),
-                45 => Kind::Method(M::Date),
+                45 => Kind::Datetime(DatetimeMethod::Date, None),
                 46 => {
                     let p = i32_(&mut c)?;
                     let s = i32_(&mut c)?;

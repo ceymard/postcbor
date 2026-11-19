@@ -32,6 +32,7 @@ pub enum Code {
     UndefinedObject,
     InvalidParameter,
     NotSupported,
+    DatetimeArgument,
     Internal,
 }
 
@@ -70,8 +71,59 @@ pub trait Host {
     fn numeric_typmod(&mut self, precision: i32, scale: i32, throw: bool) -> Option<i32>;
     /// `like_regex`, with the flags the path stores. Invalid patterns raise.
     fn regex_match(&mut self, pattern: &[u8], flags: u32, s: &[u8]) -> bool;
+    /// A datetime method once its input string is known (`executeDateTimeMethod`): parsing, then the conversion
+    /// to the method's type. Errors PostgreSQL raises whatever the mode (a cast that needs the time zone outside
+    /// `_tz` functions) are raised by the host.
+    fn datetime(&mut self, m: DatetimeMethod, arg: DtArg, s: &[u8], throw: bool, use_tz: bool) -> DtOut;
+    /// `compareDatetime`: None when the types cannot be compared.
+    fn datetime_cmp(&mut self, a: &Datetime, b: &Datetime, use_tz: bool) -> Option<Ordering>;
+    /// `JsonEncodeDateTime`: ISO 8601 text.
+    fn datetime_text(&mut self, d: &Datetime) -> String;
+    /// `timestamptz_in` of a tag 0 string: None when it is not a valid timestamp.
+    fn timestamptz_in(&mut self, s: &str) -> Option<i64>;
+    /// `to_timestamp` of a tag 1 number of seconds, within the range `timestamptz` holds.
+    fn epoch_timestamptz(&mut self, secs: f64) -> i64;
     /// Raises when the stack is close to its limit.
     fn check_stack(&mut self);
+}
+
+/// PostgreSQL's datetime types.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DtType {
+    Date,
+    Time,
+    TimeTz,
+    Timestamp,
+    TimestampTz,
+}
+
+/// A datetime value as PostgreSQL holds it: `value` is the date (days), time or timestamp (microseconds); `zone`
+/// the time zone of a `timetz`; `tz` the offset (seconds west of UTC) `timestamptz` values are shown in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Datetime {
+    pub typ: DtType,
+    pub value: i64,
+    pub zone: i32,
+    pub typmod: i32,
+    pub tz: i32,
+}
+
+/// The argument of a datetime method.
+#[derive(Clone, Copy, Debug)]
+pub enum DtArg<'p> {
+    None,
+    Template(&'p [u8]),
+    Precision(i32),
+}
+
+/// Outcome of [`Host::datetime`].
+#[derive(Debug)]
+pub enum DtOut {
+    Ok(Datetime),
+    /// A parse error suppressed in silent mode.
+    Suppressed,
+    /// An error silent mode suppresses (`RETURN_ERROR`).
+    Fail(Code, String),
 }
 
 /// A generated `.keyvalue()` object: `{"id": id, "key": key, "value": value}`.
@@ -91,6 +143,7 @@ pub enum JItem<'a> {
     Num(Num),
     Str(Cow<'a, [u8]>),
     KeyValue(Rc<KeyValue<'a>>),
+    Datetime(Datetime),
 }
 
 /// Item types, as jsonpath tells them apart. Byte strings, `undefined` and other simple values are CBOR's own.
@@ -105,13 +158,14 @@ enum Ty {
     Simple,
     Array,
     Object,
+    Datetime,
 }
 
 /// Tags the path sees through: all but numbers (2–5) and datetimes (0, 1).
 fn peel(v: Value) -> R<Value> {
     let mut v = v;
     while let VKind::Tag(t) = v.kind()? {
-        if t <= 5 && number_tag(v, t)? {
+        if t <= 5 && typed_tag(v, t)? {
             break;
         }
         v = v.tag_content()?;
@@ -119,10 +173,12 @@ fn peel(v: Value) -> R<Value> {
     Ok(v)
 }
 
-/// Tags 2 and 3 are always numbers (normalization checks their content); 4 and 5 when they hold
-/// `[integer, integer or bignum]`. Tags 0 and 1 stay transparent until datetimes are supported.
-fn number_tag(v: Value, t: u64) -> R<bool> {
+/// Whether a tag gives its content a type: tags 2 and 3 always (normalization checks their content); 4 and 5 when
+/// they hold `[integer, integer or bignum]`; 0 around text and 1 around a number.
+fn typed_tag(v: Value, t: u64) -> R<bool> {
     Ok(match t {
+        0 => matches!(v.tag_content()?.kind()?, VKind::Text(_)),
+        1 => matches!(v.tag_content()?.kind()?, VKind::Unsigned(_) | VKind::Negative(_) | VKind::Float(_)),
         2 | 3 => true,
         4 | 5 => {
             let c = v.tag_content()?;
@@ -150,9 +206,11 @@ fn ty(it: &JItem) -> R<Ty> {
         JItem::Num(_) => Ty::Num,
         JItem::Str(_) => Ty::Str,
         JItem::KeyValue(_) => Ty::Object,
+        JItem::Datetime(_) => Ty::Datetime,
         JItem::Doc(v) => {
             let v = peel(*v)?;
             match v.kind()? {
+                VKind::Tag(0 | 1) => Ty::Datetime,
                 VKind::Unsigned(_) | VKind::Negative(_) | VKind::Float(_) | VKind::Tag(_) => Ty::Num,
                 VKind::Bytes(_) => Ty::Bytes,
                 VKind::Text(_) => Ty::Str,
@@ -167,7 +225,21 @@ fn ty(it: &JItem) -> R<Ty> {
     })
 }
 
-fn type_name(t: Ty) -> &'static str {
+/// `.type()`: datetime items name their PostgreSQL type; tags 0 and 1 are `timestamptz`.
+fn type_name(it: &JItem) -> R<&'static str> {
+    Ok(match it {
+        JItem::Datetime(d) => match d.typ {
+            DtType::Date => "date",
+            DtType::Time => "time without time zone",
+            DtType::TimeTz => "time with time zone",
+            DtType::Timestamp => "timestamp without time zone",
+            DtType::TimestampTz => "timestamp with time zone",
+        },
+        _ => ty_name(ty(it)?),
+    })
+}
+
+fn ty_name(t: Ty) -> &'static str {
     match t {
         Ty::Null => "null",
         Ty::Bool => "boolean",
@@ -178,6 +250,7 @@ fn type_name(t: Ty) -> &'static str {
         Ty::Simple => "simple",
         Ty::Array => "array",
         Ty::Object => "object",
+        Ty::Datetime => "timestamp with time zone",
     }
 }
 
@@ -346,7 +419,6 @@ fn method_name(m: Method) -> &'static str {
         Method::KeyValue => "keyvalue",
         Method::Bigint => "bigint",
         Method::Boolean => "boolean",
-        Method::Date => "date",
         Method::Integer => "integer",
         Method::Number => "number",
         Method::String => "string",
@@ -369,13 +441,16 @@ struct Exec<'a, 'h, H: Host> {
     lax: bool,
     ignore_structural: bool,
     throw: bool,
+    use_tz: bool,
     ticker: Ticker,
 }
 
 /// Runs `path` over `doc` (`executeJsonPath`). With `found`, every result is appended; without, evaluation stops
 /// at the first result. `throw` false suppresses the errors jsonpath's silent mode suppresses, returning
-/// [`Res::Error`] with the results found so far. `vars`, when given, must be a map.
-pub fn execute<'a, H: Host>(path: &'a Path<'a>, doc: Value<'a>, vars: Option<Value<'a>>, throw: bool, host: &mut H, found: Found<'_, 'a>) -> R<Res> {
+/// [`Res::Error`] with the results found so far. `vars`, when given, must be a map. `use_tz` allows the datetime
+/// casts that depend on the session time zone (the `_tz` functions).
+#[allow(clippy::too_many_arguments)]
+pub fn execute<'a, H: Host>(path: &'a Path<'a>, doc: Value<'a>, vars: Option<Value<'a>>, throw: bool, use_tz: bool, host: &mut H, found: Found<'_, 'a>) -> R<Res> {
     let vars = match vars {
         Some(v) => {
             let v = peel(v)?;
@@ -399,6 +474,7 @@ pub fn execute<'a, H: Host>(path: &'a Path<'a>, doc: Value<'a>, vars: Option<Val
         lax: path.lax,
         ignore_structural: path.lax,
         throw,
+        use_tz,
         ticker: Ticker::default(),
     };
     let root = cx.root.clone();
@@ -536,7 +612,7 @@ impl<'a, H: Host> Exec<'a, '_, H> {
                 self.next_item(next, jb.clone(), found)
             }
             Kind::Method(Method::Type) => {
-                let t = type_name(ty(jb)?);
+                let t = type_name(jb)?;
                 self.next_item(next, JItem::Str(Cow::Borrowed(t.as_bytes())), found)
             }
             Kind::Method(Method::Size) => {
@@ -575,7 +651,6 @@ impl<'a, H: Host> Exec<'a, '_, H> {
                 }
                 match m {
                     Method::KeyValue => self.keyvalue(next, jb, found),
-                    Method::Date => Err(PathError::Sql(Code::NotSupported, "jsonpath item method .date() is not supported for cbor yet".into())),
                     _ => match self.convert(*m, None, jb)? {
                         Ok(v) => self.next_item(next, v, found),
                         Err(res) => Ok(res),
@@ -591,18 +666,11 @@ impl<'a, H: Host> Exec<'a, '_, H> {
                     Err(res) => Ok(res),
                 }
             }
-            Kind::Datetime(m, _) => {
+            Kind::Datetime(m, arg) => {
                 if unwrap && array_size(jb)?.is_some() {
                     return self.unwrap_target_array(Some(id), jb, found, false);
                 }
-                let name = match m {
-                    DatetimeMethod::Datetime => "datetime",
-                    DatetimeMethod::Time => "time",
-                    DatetimeMethod::TimeTz => "time_tz",
-                    DatetimeMethod::Timestamp => "timestamp",
-                    DatetimeMethod::TimestampTz => "timestamp_tz",
-                };
-                Err(PathError::Sql(Code::NotSupported, format!("jsonpath item method .{name}() is not supported for cbor yet")))
+                self.datetime(*m, *arg, next, jb, found)
             }
             Kind::Last => {
                 if self.innermost_array_size < 0 {
@@ -847,7 +915,7 @@ impl<'a, H: Host> Exec<'a, '_, H> {
             let rights: Vec<Option<&JItem<'a>>> = if rarg.is_some() { rseq.iter().map(Some).collect() } else { vec![None] };
             for r in rights {
                 let res = match pred {
-                    Pred::Cmp(op) => compare_items(op, l, r.unwrap_or(&JItem::Null))?,
+                    Pred::Cmp(op) => self.compare_items(op, l, r.unwrap_or(&JItem::Null))?,
                     Pred::StartsWith => starts_with(l, r.unwrap_or(&JItem::Null))?,
                     Pred::Regex(id) => self.like_regex(id, l)?,
                 };
@@ -1062,6 +1130,108 @@ impl<'a, H: Host> Exec<'a, '_, H> {
         Ok(res)
     }
 
+    /// `compareItems`: items of different types are unknown, except that null is unequal to everything else.
+    fn compare_items(&mut self, op: BinOp, a: &JItem<'a>, b: &JItem<'a>) -> R<Tri> {
+        let (ta, tb) = (ty(a)?, ty(b)?);
+        if ta != tb {
+            if ta == Ty::Null || tb == Ty::Null {
+                return Ok(if op == BinOp::Ne { Tri::True } else { Tri::False });
+            }
+            return Ok(Tri::Unknown);
+        }
+        let cmp = match ta {
+            Ty::Null | Ty::Undefined => Ordering::Equal,
+            Ty::Bool => bool_of(a)?.cmp(&bool_of(b)?),
+            Ty::Num => match (num_of(a)?, num_of(b)?) {
+                (Some(x), Some(y)) => x.cmp_value(&y),
+                _ => return Ok(Tri::Unknown),
+            },
+            // Strings compare by code point, which for UTF-8 is byte order.
+            Ty::Str => str_of(a)?.cmp(&str_of(b)?),
+            Ty::Bytes | Ty::Simple => scalar_bytes(a)?.cmp(&scalar_bytes(b)?),
+            Ty::Array | Ty::Object => return Ok(Tri::Unknown),
+            Ty::Datetime => match (self.datetime_of(a)?, self.datetime_of(b)?) {
+                (Some(x), Some(y)) => match self.host.datetime_cmp(&x, &y, self.use_tz) {
+                    Some(o) => o,
+                    None => return Ok(Tri::Unknown),
+                },
+                _ => return Ok(Tri::Unknown),
+            },
+        };
+        let res = match op {
+            BinOp::Eq => cmp == Ordering::Equal,
+            BinOp::Ne => cmp != Ordering::Equal,
+            BinOp::Lt => cmp == Ordering::Less,
+            BinOp::Gt => cmp == Ordering::Greater,
+            BinOp::Le => cmp != Ordering::Greater,
+            BinOp::Ge => cmp != Ordering::Less,
+            _ => return Err(PathError::Sql(Code::Internal, "unrecognized jsonpath operation".into())),
+        };
+        Ok(if res { Tri::True } else { Tri::False })
+    }
+
+    /// The datetime value of an item: computed ones, and tags 0 and 1 of the document (None when their content is
+    /// not a valid timestamp).
+    fn datetime_of(&mut self, it: &JItem<'a>) -> R<Option<Datetime>> {
+        let v = match it {
+            JItem::Datetime(d) => return Ok(Some(*d)),
+            JItem::Doc(v) => peel(*v)?,
+            _ => return Ok(None),
+        };
+        let at = |value: i64, tz: i32| Datetime { typ: DtType::TimestampTz, value, zone: 0, typmod: -1, tz };
+        Ok(match v.kind()? {
+            VKind::Tag(0) => {
+                let VKind::Text(t) = v.tag_content()?.kind()? else { return Ok(None) };
+                let Some(tz) = rfc3339_offset(t) else { return Ok(None) };
+                self.host.timestamptz_in(t).map(|value| at(value, tz))
+            }
+            VKind::Tag(1) => {
+                let secs = match num_of(&JItem::Doc(v.tag_content()?))? {
+                    Some(Num::Int(i)) => i as f64,
+                    Some(n) => n.to_text().parse::<f64>().unwrap_or(f64::NAN),
+                    None => return Ok(None),
+                };
+                // timestamptz's range: 4714-11-24 BC to 294276 AD.
+                (-210_866_803_200.0..9_224_318_016_000.0).contains(&secs).then(|| at(self.host.epoch_timestamptz(secs), 0))
+            }
+            _ => None,
+        })
+    }
+
+    /// `executeDateTimeMethod`.
+    fn datetime(&mut self, m: DatetimeMethod, arg: Option<ItemId>, next: Option<ItemId>, jb: &JItem<'a>, found: Found<'_, 'a>) -> R<Res> {
+        let name = match m {
+            DatetimeMethod::Datetime => "datetime",
+            DatetimeMethod::Date => "date",
+            DatetimeMethod::Time => "time",
+            DatetimeMethod::TimeTz => "time_tz",
+            DatetimeMethod::Timestamp => "timestamp",
+            DatetimeMethod::TimestampTz => "timestamp_tz",
+        };
+        let Some(s) = str_of(jb)? else {
+            return self.soft(Code::DatetimeArgument, || format!("jsonpath item method .{name}() can only be applied to a string"));
+        };
+        let arg = match (m, arg.map(|a| &self.path.item(a).kind)) {
+            (DatetimeMethod::Datetime, Some(Kind::String(t))) => DtArg::Template(t),
+            (DatetimeMethod::Datetime | DatetimeMethod::Date, _) | (_, None) => DtArg::None,
+            (_, Some(Kind::Numeric(n))) => match n.round_i64().and_then(|i| i32::try_from(i).ok()) {
+                Some(p) => DtArg::Precision(p),
+                None => return self.soft(Code::DatetimeArgument, || format!("time precision of jsonpath item method .{name}() is out of range for type integer")),
+            },
+            _ => return Err(PathError::Sql(Code::Internal, format!("invalid jsonpath item type for .{name}() argument"))),
+        };
+        match self.host.datetime(m, arg, s, self.throw, self.use_tz) {
+            DtOut::Ok(d) => {
+                if next.is_none() && found.is_none() {
+                    return Ok(Res::Ok);
+                }
+                self.next_item(next, JItem::Datetime(d), found)
+            }
+            DtOut::Suppressed => Ok(Res::Error),
+            DtOut::Fail(code, msg) => self.soft(code, || msg),
+        }
+    }
+
     /// The conversion methods `.double()`, `.bigint()`, `.boolean()`, `.integer()`, `.number()`, `.decimal()` and
     /// `.string()`. `Err` carries the result after a suppressed error.
     fn convert(&mut self, m: Method, decimal: Option<(Option<ItemId>, Option<ItemId>)>, jb: &JItem<'a>) -> R<Result<JItem<'a>, Res>> {
@@ -1184,6 +1354,8 @@ impl<'a, H: Host> Exec<'a, '_, H> {
                     JItem::Str(Cow::Owned(n.to_text().into_bytes()))
                 } else if let Some(b) = bool_of(jb)? {
                     JItem::Str(Cow::Borrowed(if b { b"true" } else { b"false" }))
+                } else if let Some(d) = self.datetime_of(jb)? {
+                    JItem::Str(Cow::Owned(self.host.datetime_text(&d).into_bytes()))
                 } else {
                     fail!(Code::NonNumericItem, only("a boolean, string, numeric, or datetime value"))
                 }
@@ -1191,39 +1363,6 @@ impl<'a, H: Host> Exec<'a, '_, H> {
             _ => return Err(PathError::Sql(Code::Internal, "unexpected jsonpath item method".into())),
         }))
     }
-}
-
-/// `compareItems`: items of different types are unknown, except that null is unequal to everything else.
-fn compare_items(op: BinOp, a: &JItem, b: &JItem) -> R<Tri> {
-    let (ta, tb) = (ty(a)?, ty(b)?);
-    if ta != tb {
-        if ta == Ty::Null || tb == Ty::Null {
-            return Ok(if op == BinOp::Ne { Tri::True } else { Tri::False });
-        }
-        return Ok(Tri::Unknown);
-    }
-    let cmp = match ta {
-        Ty::Null | Ty::Undefined => Ordering::Equal,
-        Ty::Bool => bool_of(a)?.cmp(&bool_of(b)?),
-        Ty::Num => match (num_of(a)?, num_of(b)?) {
-            (Some(x), Some(y)) => x.cmp_value(&y),
-            _ => return Ok(Tri::Unknown),
-        },
-        // Strings compare by code point, which for UTF-8 is byte order.
-        Ty::Str => str_of(a)?.cmp(&str_of(b)?),
-        Ty::Bytes | Ty::Simple => scalar_bytes(a)?.cmp(&scalar_bytes(b)?),
-        Ty::Array | Ty::Object => return Ok(Tri::Unknown),
-    };
-    let res = match op {
-        BinOp::Eq => cmp == Ordering::Equal,
-        BinOp::Ne => cmp != Ordering::Equal,
-        BinOp::Lt => cmp == Ordering::Less,
-        BinOp::Gt => cmp == Ordering::Greater,
-        BinOp::Le => cmp != Ordering::Greater,
-        BinOp::Ge => cmp != Ordering::Less,
-        _ => return Err(PathError::Sql(Code::Internal, "unrecognized jsonpath operation".into())),
-    };
-    Ok(if res { Tri::True } else { Tri::False })
 }
 
 /// Content of byte strings and the number of simple values, for comparing them.
@@ -1244,6 +1383,46 @@ fn starts_with(whole: &JItem, initial: &JItem) -> R<Tri> {
         (Some(_), Some(_)) => Tri::False,
         _ => Tri::Unknown,
     })
+}
+
+/// For RFC 3339 timestamp text (`2013-03-21T20:04:00Z`, fraction and numeric offset allowed), its offset in
+/// seconds west of UTC, as PostgreSQL counts them; None for anything else.
+fn rfc3339_offset(t: &str) -> Option<i32> {
+    let b = t.as_bytes();
+    let digits = |r: core::ops::Range<usize>| b.get(r).is_some_and(|d| d.iter().all(u8::is_ascii_digit));
+    let at = |i: usize, c: &[u8]| b.get(i).is_some_and(|x| c.contains(x));
+    if !(digits(0..4) && at(4, b"-") && digits(5..7) && at(7, b"-") && digits(8..10) && at(10, b"Tt ") && digits(11..13) && at(13, b":") && digits(14..16) && at(16, b":") && digits(17..19)) {
+        return None;
+    }
+    let mut i = 19;
+    if at(i, b".") {
+        i += 1;
+        let start = i;
+        while at(i, b"0123456789") {
+            i += 1;
+        }
+        if i == start {
+            return None;
+        }
+    }
+    match b.get(i..)? {
+        b"Z" | b"z" => Some(0),
+        [sign @ (b'+' | b'-'), h1, h2, b':', m1, m2] if [h1, h2, m1, m2].iter().all(|d| d.is_ascii_digit()) => {
+            let n = |a: &u8, b: &u8| i32::from(a - b'0') * 10 + i32::from(b - b'0');
+            let east = n(h1, h2) * 3600 + n(m1, m2) * 60;
+            Some(if *sign == b'+' { -east } else { east })
+        }
+        _ => None,
+    }
+}
+
+/// Replaces computed datetimes by their ISO 8601 text, as jsonb returns them.
+pub fn datetimes_to_text<H: Host>(items: &mut [JItem], host: &mut H) {
+    for it in items {
+        if let JItem::Datetime(d) = it {
+            *it = JItem::Str(Cow::Owned(host.datetime_text(d).into_bytes()));
+        }
+    }
 }
 
 /// `Some(Some(b))` for a boolean, `Some(None)` for null, None for anything else (`jsonb_path_match`'s result).
@@ -1268,6 +1447,8 @@ fn write_body(it: &JItem, out: &mut impl OutBuf) -> crate::Result<()> {
             write_head(out, MAJOR_TEXT, s.len() as u64)?;
             out.write_bytes(s)
         }
+        // Callers convert datetimes first (`datetimes_to_text`).
+        JItem::Datetime(_) => out.write_byte(0xf6),
         JItem::KeyValue(kv) => {
             write_head(out, MAJOR_MAP, 3)?;
             for (k, v) in KV_KEYS.iter().zip([&JItem::Num(Num::Int(kv.id)), &kv.key, &kv.value]) {
@@ -1346,6 +1527,21 @@ impl Host for PlainHost {
     }
     fn regex_match(&mut self, pattern: &[u8], _flags: u32, s: &[u8]) -> bool {
         pattern.is_empty() || s.windows(pattern.len()).any(|w| w == pattern)
+    }
+    fn datetime(&mut self, _m: DatetimeMethod, _arg: DtArg, _s: &[u8], _throw: bool, _use_tz: bool) -> DtOut {
+        DtOut::Fail(Code::NotSupported, "no datetimes without PostgreSQL".into())
+    }
+    fn datetime_cmp(&mut self, a: &Datetime, b: &Datetime, _use_tz: bool) -> Option<Ordering> {
+        (a.typ == b.typ).then(|| a.value.cmp(&b.value))
+    }
+    fn datetime_text(&mut self, d: &Datetime) -> String {
+        d.value.to_string()
+    }
+    fn timestamptz_in(&mut self, _s: &str) -> Option<i64> {
+        None
+    }
+    fn epoch_timestamptz(&mut self, secs: f64) -> i64 {
+        secs as i64 * 1_000_000
     }
     fn check_stack(&mut self) {}
 }
@@ -1450,7 +1646,7 @@ mod tests {
         let d = doc(text);
         let d = Datum::parse(&d).unwrap();
         let mut found = Vec::new();
-        let res = execute(&path, Value::root(&d), None, throw, &mut PlainHost, Some(&mut found)).map_err(|e| format!("{e:?}"))?;
+        let res = execute(&path, Value::root(&d), None, throw, false, &mut PlainHost, Some(&mut found)).map_err(|e| format!("{e:?}"))?;
         if res == Res::Error {
             return Err(format!("suppressed after {}", found.len()));
         }
@@ -1471,7 +1667,7 @@ mod tests {
         let path = Path::decode(&bin).unwrap();
         let d = doc(text);
         let d = Datum::parse(&d).unwrap();
-        execute(&path, Value::root(&d), None, false, &mut PlainHost, None).unwrap()
+        execute(&path, Value::root(&d), None, false, false, &mut PlainHost, None).unwrap()
     }
 
     const GT: u8 = 11;
@@ -1519,7 +1715,7 @@ mod tests {
         let path = Path::decode(&bin).unwrap();
         let d = Datum::parse(&d).unwrap();
         let mut found = Vec::new();
-        execute(&path, Value::root(&d), None, true, &mut PlainHost, Some(&mut found)).unwrap();
+        execute(&path, Value::root(&d), None, true, false, &mut PlainHost, Some(&mut found)).unwrap();
         assert_eq!(found.len(), n + 1);
     }
 
@@ -1529,6 +1725,16 @@ mod tests {
         let path = [P::Root, P::AnyArray, P::Filter(vec![P::Bin(EQ, vec![P::Cur, P::Key("a")], vec![P::Num("1")])])];
         assert_eq!(exists(true, &path, r#"[{"a": 1}, 2]"#), Res::Ok);
         assert_eq!(exists(true, &path, r#"[{"a": 2}]"#), Res::NotFound);
+    }
+
+    #[test]
+    fn rfc3339_offsets_are_seconds_west() {
+        assert_eq!(rfc3339_offset("2013-03-21T20:04:00Z"), Some(0));
+        assert_eq!(rfc3339_offset("2013-03-21T20:04:00.5+01:30"), Some(-5400));
+        assert_eq!(rfc3339_offset("2013-03-21 20:04:00-05:00"), Some(18000));
+        for bad in ["2013-03-21T20:04:00", "2013-03-21T20:04:00.Z", "2013-3-21T20:04:00Z", "2013-03-21T20:04:00+0100", "x"] {
+            assert_eq!(rfc3339_offset(bad), None, "{bad}");
+        }
     }
 
     #[test]

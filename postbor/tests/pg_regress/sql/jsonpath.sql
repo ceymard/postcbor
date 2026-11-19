@@ -19,8 +19,8 @@ SELECT cbor_path_query('{"a": 2}', '$.a * 3');
 SELECT cbor_path_query('{"a": 1.5}', '$.a + 1');
 SELECT cbor_path_query('1', '$ / 3');
 SELECT cbor_path_query('9223372036854775807', '$ + 1');
-SELECT cbor_path_query('1.0', '$.string()');
-SELECT cbor_path_query('4([-2, 150])', '$.string()');
+SELECT cbor_path_query('1.0', '$ + 0');
+SELECT cbor_path_query('4([-2, 150])', '$ + 0');
 
 -- Tags other than numbers are transparent; the result keeps its tag.
 SELECT cbor_path_query('42({"a": 32("http://x")})', '$.a');

@@ -289,7 +289,7 @@ Queries:
 - **Arithmetic** is decimal, as in SQL/JSON, and runs PostgreSQL's `numeric` functions, so results and scales match jsonb's. A result of scale 0 becomes an integer (a bignum if large); any other a decimal fraction (tag 4) keeping its scale: `2 * 3` is `6`, `2 * 2.5` is `5.0`, `4([-1, 50])`. Results returned unchanged from the document keep their CBOR form (a float stays a float).
 - **NaN and ±Infinity** floats are numbers, ordered as `numeric` orders them: NaN equals itself and sorts above everything.
 - **`.keyvalue()` ids** are unique per object, as in jsonb, and equal to jsonb's for objects at the top of the document. jsonb derives the others from its own byte layout; ours come from positions in the CBOR value, so they differ.
-- **Regex and datetimes**: `like_regex` runs PostgreSQL's regex engine; the datetime methods use PostgreSQL's datetime parsing.
+- **Regex and datetimes**: `like_regex` runs PostgreSQL's regex engine; the datetime methods use PostgreSQL's datetime parsing, casts and time zone rules (the `_tz` functions allow the casts that depend on the session time zone). A datetime result comes back as ISO 8601 text, as jsonb returns it. Tag 0 is a `timestamptz` when its text is RFC 3339 (shown with its own offset), tag 1 when its number of seconds is within `timestamptz`'s range; otherwise the tag is transparent.
 - **GIN**: `@?` and `@@` use `cbor_ops` and `cbor_path_ops` for paths made of key accessors and equality with constants, as jsonb's classes do.
 
 ### Subscripting
