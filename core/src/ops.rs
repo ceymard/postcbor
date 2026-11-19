@@ -180,7 +180,13 @@ enum Step {
     Open(Frame),
 }
 
-/// `a @> b` with jsonb semantics; tags contain tags of the same number with contained content.
+/// Decimal fractions (tag 4) and bigfloats (tag 5) are numbers stored as arrays: containment compares them whole.
+pub fn is_number_tag(tag: u64) -> bool {
+    matches!(tag, 4 | 5)
+}
+
+/// `a @> b` with jsonb semantics; tags contain tags of the same number with contained content, except
+/// [number tags](is_number_tag), which must be equal.
 pub fn contains(a: &Value, b: &Value, ctx: &mut impl crate::ctx::Ctx) -> Result<bool> {
     // Top level only: an array contains a scalar that is one of its elements.
     if a.head()?.0.major == MAJOR_ARRAY && !matches!(b.head()?.0.major, MAJOR_ARRAY | MAJOR_MAP) {
@@ -282,10 +288,11 @@ fn start(mut a: Value, mut b: Value) -> Result<Step> {
             (MAJOR_ARRAY, MAJOR_ARRAY) => {
                 Step::Open(Frame::Array { a_first: fa, a_len: ha.arg, b_cur: fb, b_left: hb.arg, cand: fa, cand_left: ha.arg })
             }
-            (MAJOR_TAG, MAJOR_TAG) if ha.arg == hb.arg => {
+            (MAJOR_TAG, MAJOR_TAG) if ha.arg == hb.arg && !is_number_tag(ha.arg) => {
                 (a.pos, b.pos) = (fa, fb);
                 continue;
             }
+            (MAJOR_TAG, MAJOR_TAG) if ha.arg == hb.arg => Step::Decided(a.bytes()? == b.bytes()?),
             (MAJOR_MAP | MAJOR_ARRAY | MAJOR_TAG, _) | (_, MAJOR_MAP | MAJOR_ARRAY | MAJOR_TAG) => Step::Decided(false),
             _ => Step::Decided(a.bytes()? == b.bytes()?),
         });
@@ -327,6 +334,12 @@ mod tests {
         assert!(!c("1", "1.0"));
         assert!(c("[1(5), 2]", "[1(5)]"));
         assert!(c(r#"1({"a": 1, "b": 2})"#, r#"1({"a": 1})"#));
+        assert!(c("258([1, 2, 3])", "258([3])"));
+        // Decimals and bigfloats are numbers, not arrays.
+        assert!(c("4([-2, 150])", "4([-2, 150])"));
+        assert!(!c("4([-2, 150])", "4([150, -2])"));
+        assert!(!c("5([-2, 150])", "5([-2])"));
+        assert!(c("[4([-2, 150])]", "[4([-2, 150])]"));
         assert!(!c(r#"1({"a": 1})"#, r#"7({"a": 1})"#));
         // Backtracking: the first candidate that matches "x" fails on "y".
         assert!(c(r#"[{"x": 1}, {"x": 1, "y": 2}]"#, r#"[{"x": 1, "y": 2}]"#));

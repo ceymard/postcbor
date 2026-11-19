@@ -223,7 +223,7 @@ The property tests in section 10 check antisymmetry, transitivity, and agreement
 | `->` | `text`, `bytea` | `cbor` | Text key, byte-string key |
 | `->>` | same as `->` | `text` | Text string → its text; `null` → SQL NULL; anything else → EDN |
 | `#>` / `#>>` | `text[]` | `cbor` / `text` | Text path, jsonb rules |
-| `@>`, `<@` | `cbor` | `bool` | Containment, jsonb semantics. Tags: same number and the content contains |
+| `@>`, `<@` | `cbor` | `bool` | Containment, jsonb semantics. Tags: same number and the content contains, except decimal fractions (tag 4) and bigfloats (tag 5), which are numbers and must be equal |
 | `?` | `text` | `bool` | Map key exists, or a top-level array element is that text string |
 | `?\|`, `?&` | `text[]` | `bool` | Any / all |
 | `\|\|` | `cbor` | `cbor` | jsonb concatenation semantics |

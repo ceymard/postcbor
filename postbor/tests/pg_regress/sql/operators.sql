@@ -10,6 +10,8 @@ SELECT cbor_get('{1: {"a": [true]}}', '1'), cbor_get_path('{1: {"a": [true]}}', 
 SELECT cbor_extract_path('{"a": {"b": 1}}', 'a', 'b'), cbor_extract_path_text('{"a": {"b": "x"}}', 'a', 'b');
 -- Containment and existence.
 SELECT '{"a": 1, "b": [1, 2, {"c": 3}]}'::cbor @> '{"b": [{"c": 3}]}', '[1, 2]'::cbor @> '1', '1'::cbor @> '1.0', '{"a": 1}'::cbor <@ '{"a": 1, "b": 2}';
+-- Tags: same number and contained content; decimal fractions and bigfloats must be equal.
+SELECT '258([1, 2, 3])'::cbor @> '258([3])', '1(5)'::cbor @> '5', '4([-2, 150])'::cbor @> '4([-2, 150])', '4([-2, 150])'::cbor @> '4([150, -2])', '5([-2, 150])'::cbor @> '5([-2])';
 SELECT '{"a": 1}'::cbor ? 'a', '["a", "b"]'::cbor ? 'b', '{"a": 1}'::cbor ?| '{x,a}', '{"a": 1}'::cbor ?& '{x,a}';
 SELECT cbor_has('{1: 2}', '1'), cbor_has_any('{1: 2}', '[3, 1]'), cbor_has_all('{1: 2}', '[3, 1]');
 -- Building new values.

@@ -90,6 +90,7 @@ fn contains_ref(a: &Value, b: &Value, top: bool) -> bool {
             .array_iter()
             .unwrap()
             .all(|be| a.array_iter().unwrap().any(|ae| contains_ref(&ae.unwrap(), be.as_ref().unwrap(), false))),
+        (Kind::Tag(x), Kind::Tag(y)) if x == y && postbor_core::ops::is_number_tag(x) => a.bytes().unwrap() == b.bytes().unwrap(),
         (Kind::Tag(x), Kind::Tag(y)) => x == y && contains_ref(&a.tag_content().unwrap(), &b.tag_content().unwrap(), false),
         (ka, kb) if is_container(&ka) || is_container(&kb) => false,
         _ => a.bytes().unwrap() == b.bytes().unwrap(),

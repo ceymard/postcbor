@@ -50,6 +50,13 @@ SELECT '{"a": 1, "b": [1, 2, {"c": 3}]}'::cbor @> '{"b": [{"c": 3}]}', '[1, 2]':
  t        | t        | f        | t
 (1 row)
 
+-- Tags: same number and contained content; decimal fractions and bigfloats must be equal.
+SELECT '258([1, 2, 3])'::cbor @> '258([3])', '1(5)'::cbor @> '5', '4([-2, 150])'::cbor @> '4([-2, 150])', '4([-2, 150])'::cbor @> '4([150, -2])', '5([-2, 150])'::cbor @> '5([-2])';
+ ?column? | ?column? | ?column? | ?column? | ?column? 
+----------+----------+----------+----------+----------
+ t        | f        | t        | f        | f
+(1 row)
+
 SELECT '{"a": 1}'::cbor ? 'a', '["a", "b"]'::cbor ? 'b', '{"a": 1}'::cbor ?| '{x,a}', '{"a": 1}'::cbor ?& '{x,a}';
  ?column? | ?column? | ?column? | ?column? 
 ----------+----------+----------+----------
