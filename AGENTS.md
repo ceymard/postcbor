@@ -21,10 +21,11 @@ A PostgreSQL extension that adds a `cbor` type, the CBOR counterpart of `jsonb`.
 - Comments are terse. Only comment project-specific behaviour, business rules and edge cases: state the constraint and its reason, then stop. Leave out explanations of the language or a library, lists of what breaks if the rule is violated, arguments against alternatives (unless one was tried and failed), and spec citations.
 - Function comments: one or two sentences. Public items are the exception: state what the caller cannot see in the signature (distinguishable errors, ownership, panics, lifetimes), not how it works.
 - When replying or writing specs, docs or comments, use plain English, no jargon, no buzzwords.
-- Update the docs (`docs/content`) as you work on the code; they must always be accurate.
+- Update the docs (`docs/content`) as you work on the code; they must always be accurate. The user pages restate the spec for users: a behaviour change updates both. Run each SQL example against PostgreSQL when you write or change it, and paste its real output.
+- The site states that postbor was written by AI and how it was reviewed (`how-built.md`, README); keep that page true as the process changes.
 - Keep previously built docs (`docs/site`) in place when testing with zensical; deleting them breaks the live server.
 - In markdown, write each paragraph on one line; editors soft-wrap.
-- Before declaring done: `cargo clippy --all-targets -- -D warnings`, `make test`, and `make miri` if `core/` changed.
+- Before declaring done: `cargo clippy --all-targets -- -D warnings`, `make test`, `make miri` if `core/` changed, and `make docs` if `docs/content` changed.
 
 # Rust core (`core/`)
 

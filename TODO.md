@@ -13,7 +13,7 @@ Notes from implementation:
 - [x] Cargo workspace: `core/` (`postbor-core`, `#![forbid(unsafe_code)]`), `postbor/` (pgrx 0.20, features `pg15`–`pg18`), `fuzz/` (excluded from the default build). Pin the toolchain in `rust-toolchain.toml` (stable, edition 2024). Release profile: `overflow-checks = true`, `panic = "unwind"`.
 - [x] `Makefile`: `install` (`cargo pgrx install --release --pg-config $(PG_CONFIG)`, with `PG_CONFIG ?= pg_config` and the pg feature picked from `pg_config --version`), `test` (core tests, then pg_regress against the local PG), `test-matrix` (pgrx-managed PG 15–18), `fuzz` (each target, with a time budget), `miri`. Done when `make && make install` then `CREATE EXTENSION postbor` works on the local PG 18. Verified from scratch on the `postgres:18` Docker image (distro PostgreSQL, needs `libicu-dev`).
 - [x] CI: GitHub Actions (`.github/workflows/ci.yml`, decided 2026-11-19): clippy and `make test-matrix` per PostgreSQL version (pgrx installations cached), `make miri`, `make fuzz` at 30 s per target, on a pinned nightly. Not yet run: the repository has no remote.
-- [ ] Set up a zensical site for `docs/content` (`zensical.toml`) and add user docs pages as features land.
+- [x] Zensical site for `docs/content` (`zensical.toml`, `make docs`, `make docs-serve`; decided with the user 2026-11-19): user pages, the specification and contributor pages under Internals; ADRs, `CONTEXT.md` and `TODO.md` stay off the site. Examples are run by hand when written, not tested. `.github/workflows/docs.yml` builds strictly on every change and deploys `main` to GitHub Pages; not yet run (no remote).
 
 ## Phase 1: core
 

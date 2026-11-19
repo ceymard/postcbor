@@ -10,8 +10,10 @@ FUZZ_SECONDS ?= 60
 NIGHTLY ?= nightly
 # Extra flags for `cargo pgrx install`, e.g. --sudo to install into root-owned system directories.
 PGRX_INSTALL_FLAGS ?=
+# Documentation site generator, run through uvx.
+ZENSICAL ?= uvx zensical==0.1.2
 
-.PHONY: all install test test-core test-matrix miri fuzz clippy crosscheck cborx-check
+.PHONY: all install test test-core test-matrix miri fuzz clippy crosscheck cborx-check docs docs-serve
 
 # pgrx needs the PostgreSQL installation registered once. Building and installing use a project-local pgrx home,
 # so a developer's ~/.pgrx (used by the test targets) is never modified.
@@ -57,3 +59,10 @@ cborx-check:
 
 clippy:
 	$(CARGO) clippy --all-targets -- -D warnings
+
+# Strict: a broken link fails the build. Builds over docs/site in place, so a running docs-serve keeps working.
+docs:
+	$(ZENSICAL) build --strict
+
+docs-serve:
+	$(ZENSICAL) serve

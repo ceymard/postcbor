@@ -1,6 +1,6 @@
 # postbor design
 
-This is the reference specification. Terms are defined in `CONTEXT.md`, and the reasons behind decisions are in `docs/adr/`. Implementation order and progress are tracked in `TODO.md`.
+This is the reference specification: how postbor behaves, exactly. The user pages describe the same behaviour less formally. In the repository, `CONTEXT.md` defines the terms used here, `docs/adr/` records the reasons behind decisions (cited as ADR-NNNN), and `TODO.md` tracks the implementation plan.
 
 ## 1. Goals and scope
 
@@ -8,11 +8,6 @@ This is the reference specification. Terms are defined in `CONTEXT.md`, and the 
 - Extension name `postbor`, type name `cbor`. Operator symbols are the same as jsonb's, plus `?#`, `?#|` and `?#&` for keys of any type.
 - PostgreSQL 15–18.
 - Install with `make && make install` (a wrapper around `cargo pgrx install`). Pre-built packages are out of scope for now.
-
-Phases:
-1. I/O, casts, operators, btree and hash operator classes, subscripting, every non-path function.
-2. GIN operator classes (`cbor_ops`, `cbor_path_ops`).
-3. Path queries over the core `jsonpath` type ([ADR-0008](../adr/0008-path-queries-reuse-jsonpath.md)).
 
 ## 2. Threat model and limits
 
@@ -136,18 +131,18 @@ Core EDN only, written deterministically:
 - **Integers**: decimal.
 - **Bignums over 64 bits**: `2(h'…')` / `3(h'…')`.
 - **Floats**: the shortest decimal that reads back as the same value. It always contains `.` or `e` (`1.0`, `1.5e300`). Special values print as `NaN`, `Infinity`, `-Infinity`, `-0.0`.
-- **Text**: JSON escaping; other characters are written as they are (databases are UTF-8, [ADR-0010](../adr/0010-utf8-databases-only.md)).
+- **Text**: JSON escaping; other characters are written as they are (databases are UTF-8, ADR-0010).
 - **Bytes**: `h'…'` in lowercase hex.
 - **Tags**: `N(item)`.
 - **Simple values**: `simple(n)`, `true`, `false`, `null`, `undefined`.
 
 `cbor_diag(c, pretty => true)` and `cbor_pretty(c)` indent with 4 spaces, one entry per line, like `jsonb_pretty`.
 
-Only UTF-8 databases are supported: `CREATE EXTENSION` refuses others ([ADR-0010](../adr/0010-utf8-databases-only.md)).
+Only UTF-8 databases are supported: `CREATE EXTENSION` refuses others (ADR-0010).
 
 ## 6. Packed input
 
-Unpacking happens during normalization, on every input path (`cbor_in`, `cbor_recv`, `bytea::cbor`, `cbor_from_bytea`). There is no opt-out: stored data never contains packing ([ADR-0005](../adr/0005-unpack-on-input.md)).
+Unpacking happens during normalization, on every input path (`cbor_in`, `cbor_recv`, `bytea::cbor`, `cbor_from_bytea`). There is no opt-out: stored data never contains packing (ADR-0005).
 
 **Idempotence (required):** normalizing a stored body again gives exactly the same body. If unpacking could be turned off, a stored packing tag would be unpacked on restore (`pg_dump` goes through `cbor_out`/`cbor_in` or `send`/`recv`), and the value would change. This is why there is no opt-out.
 
@@ -199,7 +194,7 @@ Output: `cbor_pack(c cbor, format text DEFAULT 'cbor-x') → bytea`.
   11. undefined
 - **Within a rank:**
   - **Numbers**: compared by exact mathematical value. Integers and floats are compared exactly, without going through f64. NaN sorts after every other number. When values are equal: integer < float, and -0.0 < 0.0.
-  - **Byte and text strings**: bytewise lexicographic; a prefix sorts first. Text is compared as UTF-8 bytes, with no collation ([ADR-0007](../adr/0007-natural-collation-free-order.md)).
+  - **Byte and text strings**: bytewise lexicographic; a prefix sorts first. Text is compared as UTF-8 bytes, with no collation (ADR-0007).
   - **Arrays**: element by element; a prefix sorts first.
   - **Maps**: fewer entries sort first. Then key 1, value 1, key 2, … in stored order.
   - **Tags**: by tag number, then by content.
@@ -225,10 +220,10 @@ The property tests in section 10 check antisymmetry, transitivity, and agreement
 | `#>` / `#>>` | `text[]` | `cbor` / `text` | Text path, jsonb rules |
 | `@>`, `<@` | `cbor` | `bool` | Containment, jsonb semantics. Tags: same number and the content contains, except decimal fractions (tag 4) and bigfloats (tag 5), which are numbers and must be equal |
 | `?` | `text` | `bool` | Map key exists, or a top-level array element is that text string |
-| `?\|`, `?&` | `text[]` | `bool` | Any / all |
+| `?|`, `?&` | `text[]` | `bool` | Any / all |
 | `?#` | `cbor` | `bool` | `?` with a key of any type (`cbor_has`) |
-| `?#\|`, `?#&` | `cbor` (an array of keys) | `bool` | Any / all, keys of any type (`cbor_has_any`, `cbor_has_all`) |
-| `\|\|` | `cbor` | `cbor` | jsonb concatenation semantics |
+| `?#|`, `?#&` | `cbor` (an array of keys) | `bool` | Any / all, keys of any type (`cbor_has_any`, `cbor_has_all`) |
+| `||` | `cbor` | `cbor` | jsonb concatenation semantics |
 | `-` | `text`, `text[]`, `int`, `bytea` | `cbor` | Delete a key, or delete an element (`int`: by index) |
 | `#-` | `text[]` | `cbor` | Delete at path |
 | `= <> < <= > >=` | `cbor` | `bool` | Section 7 |
@@ -244,7 +239,7 @@ Typed-key functions:
 |---|---|
 | `cbor_get(doc, key cbor)`, `cbor_get_text(doc, key cbor)` | `->` / `->>` with a key of any type, or an array index |
 | `cbor_get_path(doc, path cbor)`, `cbor_get_path_text(doc, path cbor)` | `#>` / `#>>` with a typed path |
-| `cbor_has(doc, key cbor)`, `cbor_has_any(doc, keys cbor)`, `cbor_has_all(doc, keys cbor)` | `?`, `?\|`, `?&` with keys of any type (`keys` is a CBOR array) |
+| `cbor_has(doc, key cbor)`, `cbor_has_any(doc, keys cbor)`, `cbor_has_all(doc, keys cbor)` | `?`, `?|`, `?&` with keys of any type (`keys` is a CBOR array) |
 | `cbor_delete(doc, key cbor)`, `cbor_delete_path(doc, path cbor)` | `-`, `#-` |
 | `cbor_set_path`, `cbor_set_lax_path`, `cbor_insert_path` | `cbor_set`, `cbor_set_lax`, `cbor_insert` with a typed path |
 
@@ -260,7 +255,7 @@ Two operator classes, as for jsonb. Both are lossy: every match is rechecked aga
 
 | Class | Operators | Entries | Storage |
 |---|---|---|---|
-| `cbor_ops` (default) | `@>` `?` `?\|` `?&` `?#` `?#\|` `?#&` `@?` `@@` | One per map key and one per atomic item, without their position, plus the path-equality form of items that differ from it | `bytea` |
+| `cbor_ops` (default) | `@>` `?` `?|` `?&` `?#` `?#|` `?#&` `@?` `@@` | One per map key and one per atomic item, without their position, plus the path-equality form of items that differ from it | `bytea` |
 | `cbor_path_ops` | `@>` | One per atomic item: a hash of the path leading to it and of the item | `int4` |
 
 Both come from one walk over the value (core `gin`), in body order:
@@ -277,9 +272,9 @@ Queries:
 - `@?`, `@@` (`cbor_ops`): as jsonb, from each `accessors == literal` condition (accessors: `.key`, `.*`, `.**`, `[…]`, `[*]`, and filters on them): the key entries of its `.key` steps AND the literal's path-equality entry. The literal's role is the value role after a key step in strict mode, the key role after `[…]` or at the top, and either one in lax mode or after `.**`. `&&`, `||` and `!` combine conditions (NOT through De Morgan; `!` of an equality gives nothing); an AND keeps the side that has entries. A path with no such condition scans the whole index. `cbor_path_ops` has no path support: its hashes include tags, which paths look through.
 - Strategy numbers: 7 `@>`, 9 `?`, 10 `?|`, 11 `?&`, 15 `@?`, 16 `@@` (jsonb's), 12 `?#`, 13 `?#|`, 14 `?#&`.
 
-### Path queries (phase 3)
+### Path queries
 
-`@?`, `@@` and `cbor_path_exists`, `cbor_path_match`, `cbor_path_query` (set-returning), `cbor_path_query_array`, `cbor_path_query_first`, each with `vars cbor` (a map) and `silent bool`, plus the `_tz` variants. The path argument is PostgreSQL's `jsonpath` ([ADR-0008](../adr/0008-path-queries-reuse-jsonpath.md)). Results must equal jsonb's for every value that converts to jsonb without loss: the reference is `jsonb_path_*(value::jsonb, …)`.
+`@?`, `@@` and `cbor_path_exists`, `cbor_path_match`, `cbor_path_query` (set-returning), `cbor_path_query_array`, `cbor_path_query_first`, each with `vars cbor` (a map) and `silent bool`, plus the `_tz` variants. The path argument is PostgreSQL's `jsonpath` (ADR-0008). Results must equal jsonb's for every value that converts to jsonb without loss: the reference is `jsonb_path_*(value::jsonb, …)`.
 
 - **Compiled path**: the `jsonpath` value's binary form is decoded in the core (format version 1, stable since PG 12; PG 17 appended the `.bigint()` … `.timestamp_tz()` items). Unknown versions and items are refused, and so are paths nesting deeper than 256 items (arguments and chained steps both count). The scalar functions and the operators keep the decoded path per call site; `cbor_path_query`, whose call site holds its set-returning state, decodes once per call.
 - **Numbers**: inside path expressions, numbers compare by value, as in SQL/JSON: `1 == 1.0`, and bignums, decimal fractions and bigfloats are numbers. A float takes the value of its shortest decimal form, as when it is converted to jsonb. A number without a `numeric` value (a decimal fraction beyond `numeric`'s range, a bigfloat with more than 16383 binary places) compares as unknown and is not a number for arithmetic. Containment and `=` stay typed.
@@ -311,7 +306,7 @@ Queries:
 | `jsonb_build_object(VARIADIC "any")` | `cbor_build_object` | Keys keep their type (an `int` argument becomes an integer key) |
 | `jsonb_object(text[])`, `jsonb_object(text[], text[])` | `cbor_object` | |
 | `jsonb_agg`, `jsonb_agg_strict` | `cbor_agg`, `cbor_agg_strict` | |
-| `jsonb_object_agg[_strict\|_unique\|_unique_strict]` | `cbor_object_agg[…]` | Keys of any type |
+| `jsonb_object_agg[_strict|_unique|_unique_strict]` | `cbor_object_agg[…]` | Keys of any type |
 | `jsonb_array_elements`, `_text` | `cbor_array_elements`, `_text` | `_text` uses the `->>` rules |
 | `jsonb_array_length` | `cbor_array_length` | |
 | `jsonb_each`, `_text` | `cbor_each`, `_text` | `cbor_each` returns `(key cbor, value cbor)`; `_text` returns both as text |
@@ -364,7 +359,7 @@ The set-returning functions run in value-per-call mode, using core iterators tha
 | `cbor → uuid` | Tag 37 with 16 bytes |
 | `cbor → date` | Tag 100 |
 | `cbor → bytea` | The deterministic body |
-| `cbor → jsonb/json` | Lossy, RFC 8949 §6.1 ([ADR-0009](../adr/0009-cbor-to-jsonb-is-lossy.md)); bignums, decimal fractions and bigfloats become JSON numbers when `numeric` can hold them |
+| `cbor → jsonb/json` | Lossy, RFC 8949 §6.1 (ADR-0009); bignums, decimal fractions and bigfloats become JSON numbers when `numeric` can hold them |
 | `bytea → cbor` | Decode and normalize |
 | `jsonb/json → cbor` | Text keys. Integers become integers (bignum if needed). Non-integer numbers become the nearest f64 |
 
@@ -444,8 +439,4 @@ Core rules:
 
 ## 11. Dependencies
 
-Approved: `pgrx` (and its dependency tree); for fuzzing only, `libfuzzer-sys` and `arbitrary`; for cross-checks only, Python `cbor2`. Any other dependency needs the user's approval first.
-
-## 12. Open decisions
-
-None at the moment. Ask the user before implementing anything that depends on a new one.
+Approved: `pgrx` (and its dependency tree); for fuzzing only, `libfuzzer-sys` and `arbitrary`; for cross-checks only, Python `cbor2`; for the documentation site only, Python `zensical` (pinned in the `Makefile`, run through `uvx`). Any other dependency needs the user's approval first.

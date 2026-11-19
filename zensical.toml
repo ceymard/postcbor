@@ -1,0 +1,69 @@
+# Documentation site: `make docs` builds it into docs/site, `make docs-serve` serves it.
+[project]
+site_name = "postbor"
+site_description = "A cbor type for PostgreSQL: the CBOR counterpart of jsonb"
+docs_dir = "docs/content"
+site_dir = "docs/site"
+nav = [
+  { "Overview" = "index.md" },
+  { "Install" = "install.md" },
+  { "Coming from jsonb" = "coming-from-jsonb.md" },
+  { "Guide" = [
+    { "Text form" = "text-form.md" },
+    { "Binary form" = "binary-form.md" },
+    { "Operators" = "operators.md" },
+    { "Functions" = "functions.md" },
+    { "Path queries" = "path-queries.md" },
+    { "Casts and JSON" = "casts.md" },
+    { "Indexes" = "indexes.md" },
+    { "Settings and limits" = "settings.md" },
+    { "Performance" = "performance.md" },
+  ] },
+  { "Internals" = [
+    { "Specification" = "design.md" },
+    { "Contributing" = "contributing.md" },
+    { "How this was built" = "how-built.md" },
+  ] },
+]
+
+[project.theme]
+language = "en"
+features = [
+  "content.code.copy",
+  "navigation.footer",
+  "navigation.instant",
+  "navigation.path",
+  "navigation.sections",
+  "navigation.top",
+  "navigation.tracking",
+  "search.highlight",
+]
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme)"
+toggle.icon = "lucide/sun-moon"
+toggle.name = "Switch to light mode"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: light)"
+scheme = "default"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to dark mode"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: dark)"
+scheme = "slate"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to system preference"
+
+[project.markdown_extensions]
+admonition = {}
+attr_list = {}
+def_list = {}
+md_in_html = {}
+tables = {}
+toc.permalink = true
+pymdownx.details = {}
+pymdownx.highlight.anchor_linenums = true
+pymdownx.inlinehilite = {}
+pymdownx.superfences = {}
