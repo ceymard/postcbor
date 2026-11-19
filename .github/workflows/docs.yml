@@ -6,9 +6,10 @@ on:
   push:
   pull_request:
 
+# On main, runs queue instead of cancelling each other, so a deployment is never cut off half-way.
 concurrency:
   group: docs-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   build:
@@ -26,10 +27,6 @@ jobs:
     needs: build
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-24.04
-    # Its own group: a newer push must not cancel a deployment half-way.
-    concurrency:
-      group: pages
-      cancel-in-progress: false
     permissions:
       pages: write
       id-token: write
