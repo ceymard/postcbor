@@ -360,7 +360,7 @@ The set-returning functions run in value-per-call mode, using core iterators tha
 | `cbor → uuid` | Tag 37 with 16 bytes |
 | `cbor → date` | Tag 100 |
 | `cbor → bytea` | The deterministic body |
-| `cbor → jsonb/json` | Lossy, RFC 8949 §6.1 ([ADR-0009](../adr/0009-cbor-to-jsonb-is-lossy.md)) |
+| `cbor → jsonb/json` | Lossy, RFC 8949 §6.1 ([ADR-0009](../adr/0009-cbor-to-jsonb-is-lossy.md)); bignums, decimal fractions and bigfloats become JSON numbers when `numeric` can hold them |
 | `bytea → cbor` | Decode and normalize |
 | `jsonb/json → cbor` | Text keys. Integers become integers (bignum if needed). Non-integer numbers become the nearest f64 |
 

@@ -85,8 +85,8 @@ Decided 2026-11-19 (design §8 Path queries, ADR-0008).
 - [x] Differential harness: `tests/jsonpath/extract_cases.py` turns PostgreSQL's `jsonb_jsonpath.sql` (823 cases on PG 18) into a suite that runs each statement on jsonb and on a cbor copy, compares rows as jsonb (an error on both sides is equal) and prints only differences. It joins the regression suites with the evaluator.
 - [x] Evaluator (core `jsonpath::eval`, a port of `jsonpath_exec.c`) and the SQL functions and operators: accessors, lax/strict, filters, arithmetic, item methods, `like_regex`, `vars`, `.keyvalue()`. On PG 18 the differential suite (`jsonpath_diff`, now a regression suite) matches 393 cases with rows and 185 with the same error.
 - [x] Datetime methods, datetime comparison, `_tz` behaviour, tags 0 and 1 as datetimes. Differential suite: on PG 17–18, 555 cases match with rows and 246 with the same error; on PG 15–16, 345 and 473. The rest is decimal fractions and `.keyvalue()` ids.
-- [ ] Decimal fraction results show as `[exponent, mantissa]` after `::jsonb` (question for the user).
-- [ ] `.keyvalue()` ids differ from jsonb's except for objects at the top of the document (document in design §8).
+- [x] Decimal fractions and bigfloats convert to JSON numbers (ADR-0009 addendum). The differential suite now differs only in `.keyvalue()` ids (2 cases, every version).
+- [x] `.keyvalue()` ids differ from jsonb's except for objects at the top of the document (design §8).
 - [x] Core unit tests for the evaluator (hand-built paths, Miri), fuzzing of evaluation, and regression tests at the 256-item cap (`jsonpath` suite).
 - [x] Differential suite on PG 15–17: PG 17 matches PG 18; PG 15 and 16 (fewer jsonpath features) have their own expected output (`jsonpath_diff_1.out`).
 - [x] Cache the decoded path per call site (`fn_extra`; set-returning functions decode once per call).

@@ -1154,72 +1154,12 @@ BEGIN
     END LOOP;
     RAISE WARNING 'same rows: %, same error: %, differences: %', same, errors, bad;
 END $$;
-WARNING:  select cbor_path_query('{"a": 2.5}', '-($.a * $.a).floor() % 4.3')
-  jsonb: {"jsonb_path_query": -1.7}
-  cbor:  {"jsonb_path_query": [-1, -17]}
-WARNING:  select cbor_path_query('[0, 1, -2, -3.4, 5.6]', '$[*].abs()')
-  jsonb: {"jsonb_path_query": 0} | {"jsonb_path_query": 1} | {"jsonb_path_query": 2} | {"jsonb_path_query": 3.4} | {"jsonb_path_query": 5.6}
-  cbor:  {"jsonb_path_query": 0} | {"jsonb_path_query": 1} | {"jsonb_path_query": 2} | {"jsonb_path_query": [-1, 34]} | {"jsonb_path_query": [-1, 56]}
 WARNING:  select cbor_path_query('[{"a": 1, "b": [1, 2]}, {"c": {"a": "bbb"}}]', '$[*].keyvalue()')
   jsonb: {"jsonb_path_query": {"id": 12, "key": "a", "value": 1}} | {"jsonb_path_query": {"id": 12, "key": "b", "value": [1, 2]}} | {"jsonb_path_query": {"id": 72, "key": "c", "value": {"a": "bbb"}}}
   cbor:  {"jsonb_path_query": {"id": 1, "key": "a", "value": 1}} | {"jsonb_path_query": {"id": 1, "key": "b", "value": [1, 2]}} | {"jsonb_path_query": {"id": 10, "key": "c", "value": {"a": "bbb"}}}
 WARNING:  select cbor_path_query('[{"a": 1, "b": [1, 2]}, {"c": {"a": "bbb"}}]', 'lax $.keyvalue()')
   jsonb: {"jsonb_path_query": {"id": 12, "key": "a", "value": 1}} | {"jsonb_path_query": {"id": 12, "key": "b", "value": [1, 2]}} | {"jsonb_path_query": {"id": 72, "key": "c", "value": {"a": "bbb"}}}
   cbor:  {"jsonb_path_query": {"id": 1, "key": "a", "value": 1}} | {"jsonb_path_query": {"id": 1, "key": "b", "value": [1, 2]}} | {"jsonb_path_query": {"id": 10, "key": "c", "value": {"a": "bbb"}}}
-WARNING:  select cbor_path_query('"1.23"', '$.double()')
-  jsonb: {"jsonb_path_query": 1.23}
-  cbor:  {"jsonb_path_query": [-2, 123]}
-WARNING:  select cbor_path_query('1.23', '$.decimal()')
-  jsonb: {"jsonb_path_query": 1.23}
-  cbor:  {"jsonb_path_query": [-2, 123]}
-WARNING:  select cbor_path_query('"1.23"', '$.decimal()')
-  jsonb: {"jsonb_path_query": 1.23}
-  cbor:  {"jsonb_path_query": [-2, 123]}
-WARNING:  select cbor_path_query('"+12.3"', '$.decimal()')
-  jsonb: {"jsonb_path_query": 12.3}
-  cbor:  {"jsonb_path_query": [-1, 123]}
-WARNING:  select cbor_path_query('-12.3', '$.decimal()')
-  jsonb: {"jsonb_path_query": -12.3}
-  cbor:  {"jsonb_path_query": [-1, -123]}
-WARNING:  select cbor_path_query('"-12.3"', '$.decimal()')
-  jsonb: {"jsonb_path_query": -12.3}
-  cbor:  {"jsonb_path_query": [-1, -123]}
-WARNING:  select cbor_path_query('12.3', '$.decimal() * 2')
-  jsonb: {"jsonb_path_query": 24.6}
-  cbor:  {"jsonb_path_query": [-1, 246]}
-WARNING:  select cbor_path_query('12345.678', '$.decimal(6, 1)')
-  jsonb: {"jsonb_path_query": 12345.7}
-  cbor:  {"jsonb_path_query": [-1, 123457]}
-WARNING:  select cbor_path_query('1234.5678', '$.decimal(6, 2)')
-  jsonb: {"jsonb_path_query": 1234.57}
-  cbor:  {"jsonb_path_query": [-2, 123457]}
-WARNING:  select cbor_path_query('1234.5678', '$.decimal(+6, +2)')
-  jsonb: {"jsonb_path_query": 1234.57}
-  cbor:  {"jsonb_path_query": [-2, 123457]}
-WARNING:  select cbor_path_query('0.0123456', '$.decimal(1,2)')
-  jsonb: {"jsonb_path_query": 0.01}
-  cbor:  {"jsonb_path_query": [-2, 1]}
-WARNING:  select cbor_path_query('0.0012345', '$.decimal(2,4)')
-  jsonb: {"jsonb_path_query": 0.0012}
-  cbor:  {"jsonb_path_query": [-4, 12]}
-WARNING:  select cbor_path_query('1.23', '$.number()')
-  jsonb: {"jsonb_path_query": 1.23}
-  cbor:  {"jsonb_path_query": [-2, 123]}
-WARNING:  select cbor_path_query('"1.23"', '$.number()')
-  jsonb: {"jsonb_path_query": 1.23}
-  cbor:  {"jsonb_path_query": [-2, 123]}
-WARNING:  select cbor_path_query('"+12.3"', '$.number()')
-  jsonb: {"jsonb_path_query": 12.3}
-  cbor:  {"jsonb_path_query": [-1, 123]}
-WARNING:  select cbor_path_query('-12.3', '$.number()')
-  jsonb: {"jsonb_path_query": -12.3}
-  cbor:  {"jsonb_path_query": [-1, -123]}
-WARNING:  select cbor_path_query('"-12.3"', '$.number()')
-  jsonb: {"jsonb_path_query": -12.3}
-  cbor:  {"jsonb_path_query": [-1, -123]}
-WARNING:  select cbor_path_query('12.3', '$.number() * 2')
-  jsonb: {"jsonb_path_query": 24.6}
-  cbor:  {"jsonb_path_query": [-1, 246]}
 WARNING:  TIME(10) precision reduced to maximum allowed, 6
 WARNING:  TIME(10) precision reduced to maximum allowed, 6
 WARNING:  TIME(8) precision reduced to maximum allowed, 6
@@ -1236,5 +1176,5 @@ WARNING:  TIMESTAMP(10) WITH TIME ZONE precision reduced to maximum allowed, 6
 WARNING:  TIMESTAMP(10) WITH TIME ZONE precision reduced to maximum allowed, 6
 WARNING:  TIMESTAMP(8) WITH TIME ZONE precision reduced to maximum allowed, 6
 WARNING:  TIMESTAMP(8) WITH TIME ZONE precision reduced to maximum allowed, 6
-WARNING:  same rows: 555, same error: 246, differences: 22
+WARNING:  same rows: 575, same error: 246, differences: 2
 RESET ALL;

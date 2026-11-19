@@ -84,6 +84,8 @@ pub fn print(v: &Value, out: &mut impl OutBuf, strict: bool) -> Result<()> {
             Kind::Tag(2 | 3) => {
                 out.write_bytes(num::to_decimal(&item)?.unwrap_or_default().as_bytes())?;
             }
+            // Decimal fractions and bigfloats are exact JSON numbers when `numeric` (jsonb's number) can hold them.
+            Kind::Tag(4 | 5) if let Some(t) = numeric_text(&item)? => out.write_bytes(t.as_bytes())?,
             Kind::Tag(_) => {
                 if strict {
                     return Err(unrepresentable("tags have no JSON form"));
@@ -109,6 +111,16 @@ pub fn print(v: &Value, out: &mut impl OutBuf, strict: bool) -> Result<()> {
         if complete(&mut stack, out)? {
             return Ok(());
         }
+    }
+}
+
+/// The decimal text of a tag 4 or 5 within `numeric`'s range and scale; None for malformed content or values beyond
+/// it, which convert like other tags.
+fn numeric_text(item: &Value) -> Result<Option<String>> {
+    match num::to_decimal(item) {
+        Ok(Some(t)) if crate::decimal::Num::parse(&t).is_ok() => Ok(Some(t)),
+        Err(e) if e.kind == ErrorKind::CorruptDatum => Err(e),
+        _ => Ok(None),
     }
 }
 
@@ -168,11 +180,15 @@ mod tests {
         assert_eq!(j(r#"{1: "x", h'01': [], [1]: {}}"#, false).unwrap(), r#"{"1": "x", "h'01'": [], "[1]": {}}"#);
         assert_eq!(j("-18446744073709551617", false).unwrap(), "-18446744073709551617");
         assert_eq!(j("h'00010203'", false).unwrap(), r#""AAECAw""#);
+        assert_eq!(j("[4([-2, 27315]), 5([-1, 3]), 4([1, 2(h'010000000000000000')])]", false).unwrap(), "[27315e-2, 15e-1, 18446744073709551616e1]");
+        // Beyond numeric, or malformed: the tag is dropped as for other tags.
+        assert_eq!(j("[4([100000000, 1]), 4([1])]", false).unwrap(), "[[100000000, 1], [1]]");
     }
 
     #[test]
     fn strict_conversion_rejects_what_json_cannot_hold() {
-        for t in ["h'00'", "NaN", "1(2)", "undefined", "{1: 2}"] {
+        assert_eq!(j("4([-1, 15])", true).unwrap(), "15e-1");
+        for t in ["h'00'", "NaN", "1(2)", "undefined", "{1: 2}", "4([100000000, 1])"] {
             assert!(j(t, true).is_err(), "{t}");
         }
         assert_eq!(j(r#"{"a": [1, "x", 2(h'010000000000000000')]}"#, true).unwrap(), r#"{"a": [1, "x", 18446744073709551616]}"#);

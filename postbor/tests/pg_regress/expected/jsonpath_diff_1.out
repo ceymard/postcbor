@@ -1154,20 +1154,11 @@ BEGIN
     END LOOP;
     RAISE WARNING 'same rows: %, same error: %, differences: %', same, errors, bad;
 END $$;
-WARNING:  select cbor_path_query('{"a": 2.5}', '-($.a * $.a).floor() % 4.3')
-  jsonb: {"jsonb_path_query": -1.7}
-  cbor:  {"jsonb_path_query": [-1, -17]}
-WARNING:  select cbor_path_query('[0, 1, -2, -3.4, 5.6]', '$[*].abs()')
-  jsonb: {"jsonb_path_query": 0} | {"jsonb_path_query": 1} | {"jsonb_path_query": 2} | {"jsonb_path_query": 3.4} | {"jsonb_path_query": 5.6}
-  cbor:  {"jsonb_path_query": 0} | {"jsonb_path_query": 1} | {"jsonb_path_query": 2} | {"jsonb_path_query": [-1, 34]} | {"jsonb_path_query": [-1, 56]}
 WARNING:  select cbor_path_query('[{"a": 1, "b": [1, 2]}, {"c": {"a": "bbb"}}]', '$[*].keyvalue()')
   jsonb: {"jsonb_path_query": {"id": 12, "key": "a", "value": 1}} | {"jsonb_path_query": {"id": 12, "key": "b", "value": [1, 2]}} | {"jsonb_path_query": {"id": 72, "key": "c", "value": {"a": "bbb"}}}
   cbor:  {"jsonb_path_query": {"id": 1, "key": "a", "value": 1}} | {"jsonb_path_query": {"id": 1, "key": "b", "value": [1, 2]}} | {"jsonb_path_query": {"id": 10, "key": "c", "value": {"a": "bbb"}}}
 WARNING:  select cbor_path_query('[{"a": 1, "b": [1, 2]}, {"c": {"a": "bbb"}}]', 'lax $.keyvalue()')
   jsonb: {"jsonb_path_query": {"id": 12, "key": "a", "value": 1}} | {"jsonb_path_query": {"id": 12, "key": "b", "value": [1, 2]}} | {"jsonb_path_query": {"id": 72, "key": "c", "value": {"a": "bbb"}}}
   cbor:  {"jsonb_path_query": {"id": 1, "key": "a", "value": 1}} | {"jsonb_path_query": {"id": 1, "key": "b", "value": [1, 2]}} | {"jsonb_path_query": {"id": 10, "key": "c", "value": {"a": "bbb"}}}
-WARNING:  select cbor_path_query('"1.23"', '$.double()')
-  jsonb: {"jsonb_path_query": 1.23}
-  cbor:  {"jsonb_path_query": [-2, 123]}
-WARNING:  same rows: 345, same error: 473, differences: 5
+WARNING:  same rows: 348, same error: 473, differences: 2
 RESET ALL;
