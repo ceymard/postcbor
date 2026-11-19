@@ -41,22 +41,23 @@ pub fn register() {
     );
 }
 
-/// Core context: current settings, and query cancellation through PostgreSQL's interrupt check.
-pub struct PgCtx(Limits);
+/// Core context: current settings, and query cancellation through PostgreSQL's interrupt check. Settings are read on
+/// first use: each read costs a pgrx thread check, and most operators never need them.
+pub struct PgCtx(std::cell::OnceCell<Limits>);
 
 impl PgCtx {
     pub fn new() -> Self {
-        PgCtx(Limits {
-            max_depth: MAX_DEPTH.get() as usize,
-            max_expansion_ratio: MAX_EXPANSION_RATIO.get() as usize,
-            max_expanded_size: (MAX_EXPANDED_SIZE_KB.get() as usize).saturating_mul(1024),
-        })
+        PgCtx(std::cell::OnceCell::new())
     }
 }
 
 impl Ctx for PgCtx {
     fn limits(&self) -> &Limits {
-        &self.0
+        self.0.get_or_init(|| Limits {
+            max_depth: MAX_DEPTH.get() as usize,
+            max_expansion_ratio: MAX_EXPANSION_RATIO.get() as usize,
+            max_expanded_size: (MAX_EXPANDED_SIZE_KB.get() as usize).saturating_mul(1024),
+        })
     }
     fn check_interrupts(&mut self) {
         pgrx::check_for_interrupts();

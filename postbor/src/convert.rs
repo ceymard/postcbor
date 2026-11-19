@@ -13,6 +13,7 @@ use postbor_core::{datum, edn, json, num};
 
 use crate::datum::{ByteaOut, Cbor, CborOut, JsonArg, JsonOut, JsonbArg, JsonbOut, PallocBuf, cbor_oid};
 use crate::error::{OrRaise, Source};
+use crate::io::root;
 use crate::io::{body_bytea, from_cbor_bytes, parse_datum};
 use crate::settings::PgCtx;
 
@@ -20,9 +21,6 @@ use crate::settings::PgCtx;
 const PG_EPOCH_SECS: i64 = 946_684_800;
 const PG_EPOCH_DAYS: i64 = 10_957;
 
-fn root(c: Cbor<'_>) -> Value<'_> {
-    Value::root(parse_datum(c))
-}
 
 fn wrong_type(what: &str) -> ! {
     ereport!(ERROR, PgSqlErrorCode::ERRCODE_INVALID_PARAMETER_VALUE, format!("cbor value is not {what}"));
@@ -217,7 +215,7 @@ fn to_cbor(value: AnyElement) -> CborOut {
 
 #[pg_cast(immutable, parallel_safe)]
 fn cbor_to_bool(c: Cbor<'_>) -> bool {
-    match root(c).kind().or_raise(Source::Stored) {
+    match root!(c).kind().or_raise(Source::Stored) {
         Kind::True => true,
         Kind::False => false,
         _ => wrong_type("a boolean"),
@@ -225,7 +223,7 @@ fn cbor_to_bool(c: Cbor<'_>) -> bool {
 }
 
 fn as_i64(c: Cbor<'_>, what: &str) -> i64 {
-    match root(c).kind().or_raise(Source::Stored) {
+    match root!(c).kind().or_raise(Source::Stored) {
         Kind::Unsigned(n) => i64::try_from(n).unwrap_or_else(|_| out_of_range(what)),
         Kind::Negative(n) => i64::try_from(n).map(|n| -1 - n).unwrap_or_else(|_| out_of_range(what)),
         Kind::Tag(2 | 3) => out_of_range(what),
@@ -249,7 +247,7 @@ fn cbor_to_int8(c: Cbor<'_>) -> i64 {
 }
 
 fn as_f64(c: Cbor<'_>) -> f64 {
-    match root(c).kind().or_raise(Source::Stored) {
+    match root!(c).kind().or_raise(Source::Stored) {
         Kind::Unsigned(n) => n as f64,
         Kind::Negative(n) => -1.0 - n as f64,
         Kind::Float(f) => f,
@@ -269,13 +267,13 @@ fn cbor_to_float8(c: Cbor<'_>) -> f64 {
 
 #[pg_cast(immutable, parallel_safe)]
 fn cbor_to_numeric(c: Cbor<'_>) -> AnyNumeric {
-    let text = num::to_decimal(&root(c)).or_raise(Source::Stored).unwrap_or_else(|| wrong_type("a number"));
+    let text = num::to_decimal(&root!(c)).or_raise(Source::Stored).unwrap_or_else(|| wrong_type("a number"));
     AnyNumeric::try_from(text.as_str()).unwrap_or_else(|_| out_of_range("numeric"))
 }
 
 #[pg_cast(stable, parallel_safe)]
 fn cbor_to_timestamptz(c: Cbor<'_>) -> TimestampWithTimeZone {
-    value_to_timestamptz(&root(c))
+    value_to_timestamptz(&root!(c))
 }
 
 /// Tag 0 (RFC 3339 text) or tag 1 (epoch seconds) as a timestamptz.
@@ -312,7 +310,7 @@ pub fn value_to_timestamptz(v: &Value) -> TimestampWithTimeZone {
 
 #[pg_cast(immutable, parallel_safe)]
 fn cbor_to_date(c: Cbor<'_>) -> Date {
-    value_to_date(&root(c))
+    value_to_date(&root!(c))
 }
 
 /// Tag 100 (days since 1970-01-01) as a date.
@@ -330,7 +328,7 @@ pub fn value_to_date(v: &Value) -> Date {
 
 #[pg_cast(immutable, parallel_safe)]
 fn cbor_to_uuid(c: Cbor<'_>) -> Uuid {
-    value_to_uuid(&root(c))
+    value_to_uuid(&root!(c))
 }
 
 /// Tag 37 (16 bytes) as a uuid.
@@ -358,7 +356,7 @@ fn cbor_from_bytea(b: &[u8]) -> CborOut {
 }
 
 fn json_text(c: Cbor<'_>, strict: bool) -> String {
-    value_json_text(&root(c), strict)
+    value_json_text(&root!(c), strict)
 }
 
 /// JSON text of a value (lossy unless `strict`).

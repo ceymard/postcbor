@@ -25,7 +25,7 @@ pub fn check_stored(stored: &[u8]) {
     let again = store(d.body).expect("a stored body normalizes");
     assert_eq!(again, stored, "normalization is not idempotent");
 
-    let root = Value::root(d);
+    let root = Value::root(&d);
     assert_eq!(root.end().unwrap(), d.body.len());
     assert_eq!(cmp::compare(&root, &root).unwrap(), Ordering::Equal);
 
@@ -64,5 +64,34 @@ fn check_lookups(v: &Value) {
             Kind::Tag(_) => todo.push(v.tag_content().unwrap()),
             _ => {}
         }
+    }
+}
+
+/// Checks `ops::contains` against a direct recursive reading of the jsonb rules, and that a value contains itself.
+pub fn check_contains(a: &Value, b: &Value) {
+    let got = postbor_core::ops::contains(a, b, &mut ctx()).unwrap();
+    assert_eq!(got, contains_ref(a, b, true), "containment disagrees with the reference");
+    assert!(postbor_core::ops::contains(a, a, &mut ctx()).unwrap(), "a value does not contain itself");
+}
+
+/// Reference containment. Recursive: fuzz values are limited to depth 64.
+fn contains_ref(a: &Value, b: &Value, top: bool) -> bool {
+    let is_container = |k: &Kind| matches!(k, Kind::Array(_) | Kind::Map(_) | Kind::Tag(_));
+    match (a.kind().unwrap(), b.kind().unwrap()) {
+        // Top level only: an array contains a scalar that is one of its elements.
+        (Kind::Array(_), kb) if top && !matches!(kb, Kind::Array(_) | Kind::Map(_)) => {
+            a.array_iter().unwrap().any(|e| e.unwrap().bytes().unwrap() == b.bytes().unwrap())
+        }
+        (Kind::Map(_), Kind::Map(_)) => b.map_iter().unwrap().all(|e| {
+            let (k, bv) = e.unwrap();
+            a.map_get(k.bytes().unwrap()).unwrap().is_some_and(|av| contains_ref(&av, &bv, false))
+        }),
+        (Kind::Array(_), Kind::Array(_)) => b
+            .array_iter()
+            .unwrap()
+            .all(|be| a.array_iter().unwrap().any(|ae| contains_ref(&ae.unwrap(), be.as_ref().unwrap(), false))),
+        (Kind::Tag(x), Kind::Tag(y)) => x == y && contains_ref(&a.tag_content().unwrap(), &b.tag_content().unwrap(), false),
+        (ka, kb) if is_container(&ka) || is_container(&kb) => false,
+        _ => a.bytes().unwrap() == b.bytes().unwrap(),
     }
 }

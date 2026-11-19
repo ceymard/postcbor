@@ -49,7 +49,7 @@ mod tests {
         let mut d = Vec::new();
         to_datum(text.as_bytes(), &mut d, &mut PlainCtx::default()).unwrap();
         let mut out = Vec::new();
-        print(&Value::root(Datum::parse(&d).unwrap()), &mut out, PrintOpts { pretty, ascii_only: false }).unwrap();
+        print(&Value::root(&Datum::parse(&d).unwrap()), &mut out, PrintOpts { pretty, ascii_only: false }).unwrap();
         String::from_utf8(out).unwrap()
     }
 
@@ -153,7 +153,7 @@ mod tests {
         let mut d = Vec::new();
         to_datum("\"é😀\"".as_bytes(), &mut d, &mut PlainCtx::default()).unwrap();
         let mut out = Vec::new();
-        print(&Value::root(Datum::parse(&d).unwrap()), &mut out, PrintOpts { pretty: false, ascii_only: true }).unwrap();
+        print(&Value::root(&Datum::parse(&d).unwrap()), &mut out, PrintOpts { pretty: false, ascii_only: true }).unwrap();
         assert_eq!(String::from_utf8(out).unwrap(), "\"\\u00e9\\ud83d\\ude00\"");
     }
 }

@@ -36,7 +36,7 @@ fn emit(parts: &[&[u8]], out: &mut impl OutBuf, md: usize) -> Result<()> {
 
 /// Copies `v` as a datum of its own.
 pub fn copy_value(v: &Value, out: &mut impl OutBuf) -> Result<()> {
-    datum::write_subvalue(&v.d, v.pos, v.end()?, out)
+    datum::write_subvalue(v.d, v.pos, v.end()?, out)
 }
 
 /// A change inside one container: body range `[s, e)` replaced by `new`, the container's entry count moved by `delta`.
@@ -172,7 +172,7 @@ pub fn delete_index(v: &Value, i: i64, out: &mut impl OutBuf, limits: &Limits) -
     let md = limits.max_depth;
     match v.kind()? {
         Kind::Array(_) => match v.array_get(i)? {
-            Some(e) => splice(&v.d, Some(v.pos), Change { s: e.pos, e: e.end()?, new: &[], delta: -1 }, out, md),
+            Some(e) => splice(v.d, Some(v.pos), Change { s: e.pos, e: e.end()?, new: &[], delta: -1 }, out, md),
             None => copy_value(v, out),
         },
         Kind::Map(_) => delete_matching(v, &[key_int(i).to_vec()], out, limits),
@@ -226,7 +226,7 @@ fn target(container: &Value, step: Step, strict: bool, pos: usize) -> Result<Opt
 
 fn child<'a>(c: &Value<'a>, t: &Target) -> Result<Option<Value<'a>>> {
     match t {
-        Target::Key(k) => c.map_get(k),
+        Target::Key(k) => c.map_get(k.as_slice()),
         Target::Index(i) => c.array_get(*i),
     }
 }
@@ -267,7 +267,7 @@ pub fn delete_path(v: &Value, path: &[Step], out: &mut impl OutBuf, limits: &Lim
 fn splice_rooted(v: &Value, inner: &Value, change: Change, out: &mut impl OutBuf, md: usize) -> Result<()> {
     let Change { s, e, new, delta } = change;
     if v.pos == 0 && v.end()? == v.d.body.len() {
-        return splice(&v.d, Some(inner.pos), change, out, md);
+        return splice(v.d, Some(inner.pos), change, out, md);
     }
     // Rebase onto a standalone copy of `v`.
     let mut copy = Vec::new();
@@ -296,7 +296,7 @@ pub fn set_path(v: &Value, path: &[Step], new: &[u8], mode: SetMode, out: &mut i
     let Some(parent) = walk(v, init, true)? else { return copy_value(v, out) };
     let Some(t) = target(&parent, *last, true, init.len())? else { return copy_value(v, out) };
     match t {
-        Target::Key(k) => match parent.map_get(&k)? {
+        Target::Key(k) => match parent.map_get(k.as_slice())? {
             Some(old) => {
                 if let SetMode::Insert { .. } = mode {
                     return Err(invalid("cannot replace existing key"));
@@ -443,7 +443,7 @@ pub fn assign(v: Option<&Value>, path: &[Step], new: &[u8], out: &mut impl OutBu
                 Some(Target::Key(k)) => k,
                 _ => return Err(invalid("invalid map key")),
             };
-            if let Some(old) = cur.map_get(&k)? {
+            if let Some(old) = cur.map_get(k.as_slice())? {
                 return splice_rooted(v, &cur, Change { s: old.pos, e: old.end()?, new: &tail, delta: 0 }, out, md);
             }
             let mut at = cur.end()?;
@@ -583,7 +583,7 @@ mod tests {
     fn show(d: &[u8]) -> String {
         let p = Datum::parse(d).unwrap();
         let mut out = Vec::new();
-        edn::print(&Value::root(p), &mut out, PrintOpts::default()).unwrap();
+        edn::print(&Value::root(&p), &mut out, PrintOpts::default()).unwrap();
         // The result must be exactly what normalizing its text gives (deterministic, index included).
         let s = String::from_utf8(out).unwrap();
         assert_eq!(st(&s), d, "not canonical: {s}");
@@ -592,7 +592,8 @@ mod tests {
 
     fn run(input: &str, f: impl FnOnce(&Value, &mut Vec<u8>) -> Result<()>) -> String {
         let s = st(input);
-        let v = Value::root(Datum::parse(&s).unwrap());
+        let v_d = Datum::parse(&s).unwrap();
+        let v = Value::root(&v_d);
         let mut out = Vec::new();
         f(&v, &mut out).unwrap();
         show(&out)
@@ -607,7 +608,7 @@ mod tests {
         let cat = |a: &str, b: &str| {
             let (sa, sb) = (st(a), st(b));
             let mut out = Vec::new();
-            concat(&Value::root(Datum::parse(&sa).unwrap()), &Value::root(Datum::parse(&sb).unwrap()), &mut out, &Limits::default()).unwrap();
+            concat(&Value::root(&Datum::parse(&sa).unwrap()), &Value::root(&Datum::parse(&sb).unwrap()), &mut out, &Limits::default()).unwrap();
             show(&out)
         };
         assert_eq!(cat(r#"{"a": 1, "c": 3}"#, r#"{"b": 2, "a": 9}"#), r#"{"a": 9, "b": 2, "c": 3}"#);
@@ -626,7 +627,7 @@ mod tests {
         assert_eq!(run("[1, 2, 3]", |v, o| delete_index(v, 5, o, &Limits::default())), "[1, 2, 3]");
         assert_eq!(run(r#"{1: "x", 2: "y"}"#, |v, o| delete_index(v, 1, o, &Limits::default())), r#"{2: "y"}"#);
         let s = st("1");
-        assert!(delete_index(&Value::root(Datum::parse(&s).unwrap()), 0, &mut Vec::new(), &Limits::default()).is_err());
+        assert!(delete_index(&Value::root(&Datum::parse(&s).unwrap()), 0, &mut Vec::new(), &Limits::default()).is_err());
         assert_eq!(
             run(r#"{"a": [1, {"b": 2, "c": 3}]}"#, |v, o| delete_path(v, &[Step::Text("a"), Step::Text("1"), Step::Text("b")], o, &Limits::default())),
             r#"{"a": [1, {"c": 3}]}"#
@@ -657,7 +658,7 @@ mod tests {
         assert_eq!(ins("[1, 2]", &["-1"], true), r#"[1, 2, "new"]"#);
         assert_eq!(ins(r#"{"a": 1}"#, &["b"], false), r#"{"a": 1, "b": "new"}"#);
         let s = st(r#"{"a": 1}"#);
-        let e = set_path(&Value::root(Datum::parse(&s).unwrap()), &[Step::Text("a")], &new, SetMode::Insert { after: false }, &mut Vec::new(), &Limits::default());
+        let e = set_path(&Value::root(&Datum::parse(&s).unwrap()), &[Step::Text("a")], &new, SetMode::Insert { after: false }, &mut Vec::new(), &Limits::default());
         assert!(e.is_err());
     }
 
@@ -677,7 +678,8 @@ mod tests {
         let new = body("7");
         let a = |input: Option<&str>, path: &[Step]| -> String {
             let s = input.map(st);
-            let v = s.as_ref().map(|s| Value::root(Datum::parse(s).unwrap()));
+            let d = s.as_ref().map(|s| Datum::parse(s).unwrap());
+            let v = d.as_ref().map(Value::root);
             let mut out = Vec::new();
             assign(v.as_ref(), path, &new, &mut out, &Limits::default()).unwrap();
             show(&out)
@@ -688,7 +690,7 @@ mod tests {
         assert_eq!(a(None, &[Step::Int(1), Step::Text("x")]), r#"[null, {"x": 7}]"#);
         assert_eq!(a(Some("{1: {}}"), &[Step::Int(1), Step::Bytes(&[0xff])]), "{1: {h'ff': 7}}");
         let s = st(r#"{"a": 1}"#);
-        assert!(assign(Some(&Value::root(Datum::parse(&s).unwrap())), &[Step::Text("a"), Step::Text("b")], &new, &mut Vec::new(), &Limits::default()).is_err());
+        assert!(assign(Some(&Value::root(&Datum::parse(&s).unwrap())), &[Step::Text("a"), Step::Text("b")], &new, &mut Vec::new(), &Limits::default()).is_err());
     }
 
     #[test]

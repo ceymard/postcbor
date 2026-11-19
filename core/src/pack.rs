@@ -793,7 +793,7 @@ pub fn pack(v: &Value, fmt: PackFormat, out: &mut impl OutBuf) -> Result<()> {
                     }
                     Some(PFrame::Record(n)) => {
                         *n -= 1;
-                        let key_end = end_of(&v.d, c.pos())?;
+                        let key_end = end_of(v.d, c.pos())?;
                         c = Cursor::at(body, key_end);
                         break;
                     }
@@ -876,7 +876,7 @@ mod tests {
         let mut d = Vec::new();
         edn::to_datum(text.as_bytes(), &mut d, &mut PlainCtx::default()).map_err(|e| e.kind)?;
         let mut out = Vec::new();
-        edn::print(&Value::root(Datum::parse(&d).unwrap()), &mut out, Default::default()).unwrap();
+        edn::print(&Value::root(&Datum::parse(&d).unwrap()), &mut out, Default::default()).unwrap();
         Ok(String::from_utf8(out).unwrap())
     }
 
@@ -930,7 +930,7 @@ mod tests {
         let mut d = Vec::new();
         edn::to_datum(text.as_bytes(), &mut d, &mut PlainCtx::default()).unwrap();
         let mut packed = Vec::new();
-        pack(&Value::root(Datum::parse(&d).unwrap()), fmt, &mut packed).unwrap();
+        pack(&Value::root(&Datum::parse(&d).unwrap()), fmt, &mut packed).unwrap();
         let mut back = Vec::new();
         crate::datum::from_cbor(&packed, &mut back, &mut PlainCtx::default()).unwrap();
         assert_eq!(back, d, "{fmt:?} round trip of {text}");

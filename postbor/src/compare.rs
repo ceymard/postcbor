@@ -15,7 +15,7 @@ use crate::io::parse_datum;
 fn cmp(a: Cbor<'_>, b: Cbor<'_>) -> Ordering {
     let (da, db) = (parse_datum(a), parse_datum(b));
     // Equal bodies are equal values; skip the walk.
-    let r = if da.body == db.body { Ordering::Equal } else { compare(&Value::root(da), &Value::root(db)).or_raise(Source::Stored) };
+    let r = if da.body == db.body { Ordering::Equal } else { compare(&Value::root(&da), &Value::root(&db)).or_raise(Source::Stored) };
     a.free_copy();
     b.free_copy();
     r

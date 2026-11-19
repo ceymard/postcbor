@@ -252,8 +252,10 @@ mod tests {
 
     fn cmp_hex(a: &str, b: &str) -> Ordering {
         let (sa, sb) = (stored(a), stored(b));
-        let va = Value::root(Datum::parse(&sa).unwrap());
-        let vb = Value::root(Datum::parse(&sb).unwrap());
+        let va_d = Datum::parse(&sa).unwrap();
+        let va = Value::root(&va_d);
+        let vb_d = Datum::parse(&sb).unwrap();
+        let vb = Value::root(&vb_d);
         compare(&va, &vb).unwrap()
     }
 

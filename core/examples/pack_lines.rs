@@ -14,7 +14,7 @@ fn main() {
         let mut d = Vec::new();
         let r = from_cbor(&bytes, &mut d, &mut PlainCtx::default()).and_then(|()| {
             let mut packed = Vec::new();
-            pack(&Value::root(Datum::parse(&d)?), PackFormat::CborX, &mut packed)?;
+            pack(&Value::root(&Datum::parse(&d)?), PackFormat::CborX, &mut packed)?;
             Ok(packed)
         });
         match r {

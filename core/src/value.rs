@@ -33,12 +33,12 @@ fn corrupt(at: usize) -> Error {
 /// One item inside a stored datum.
 #[derive(Clone, Copy, Debug)]
 pub struct Value<'a> {
-    pub d: Datum<'a>,
+    pub d: &'a Datum<'a>,
     pub pos: usize,
 }
 
 impl<'a> Value<'a> {
-    pub fn root(d: Datum<'a>) -> Self {
+    pub fn root(d: &'a Datum<'a>) -> Self {
         Value { d, pos: 0 }
     }
 
@@ -47,6 +47,7 @@ impl<'a> Value<'a> {
     }
 
     /// Head of this item and the position right after it.
+    #[inline]
     pub fn head(&self) -> Result<(Head, usize)> {
         let mut c = Cursor::at(self.d.body, self.pos);
         let h = c.head().map_err(|e| corrupt(e.offset))?;
@@ -89,11 +90,13 @@ impl<'a> Value<'a> {
     }
 
     /// Body offset just past this item. Jumps over indexed containers through their last entry.
+    #[inline]
     pub fn end(&self) -> Result<usize> {
-        end_of(&self.d, self.pos)
+        end_of(self.d, self.pos)
     }
 
     /// Body bytes of this item.
+    #[inline]
     pub fn bytes(&self) -> Result<&'a [u8]> {
         let end = self.end()?;
         self.d.body.get(self.pos..end).ok_or(corrupt(self.pos))
@@ -127,13 +130,13 @@ impl<'a> Value<'a> {
             None => (first, idx),
         };
         for _ in 0..skip {
-            p = end_of(&self.d, p)?;
+            p = end_of(self.d, p)?;
         }
         Ok(Some(self.at(p)))
     }
 
     /// Value stored under the key whose deterministic encoding is `key`. None when absent or not a map.
-    pub fn map_get(&self, key: &[u8]) -> Result<Option<Value<'a>>> {
+    pub fn map_get(&self, key: &(impl EncodedKey + ?Sized)) -> Result<Option<Value<'a>>> {
         let (h, first) = self.head()?;
         if h.major != MAJOR_MAP {
             return Ok(None);
@@ -148,7 +151,7 @@ impl<'a> Value<'a> {
                 let mid = lo + (hi - lo) / 2;
                 let k = self.at(self.pos + ix.sample(t, mid)?);
                 let kend = k.end()?;
-                match self.d.body.get(k.pos..kend).ok_or(corrupt(k.pos))?.cmp(key) {
+                match key.cmp_stored(self.d.body.get(k.pos..kend).ok_or(corrupt(k.pos))?) {
                     core::cmp::Ordering::Less => lo = mid + 1,
                     core::cmp::Ordering::Greater => hi = mid,
                     core::cmp::Ordering::Equal => return Ok(Some(self.at(kend))),
@@ -162,9 +165,9 @@ impl<'a> Value<'a> {
             left = (h.arg - (lo as u64 - 1) * STRIDE).min(STRIDE);
         }
         for _ in 0..left {
-            let kend = end_of(&self.d, p)?;
-            match self.d.body.get(p..kend).ok_or(corrupt(p))?.cmp(key) {
-                core::cmp::Ordering::Less => p = end_of(&self.d, kend)?,
+            let kend = end_of(self.d, p)?;
+            match key.cmp_stored(self.d.body.get(p..kend).ok_or(corrupt(p))?) {
+                core::cmp::Ordering::Less => p = end_of(self.d, kend)?,
                 core::cmp::Ordering::Equal => return Ok(Some(self.at(kend))),
                 // Keys are sorted: once past, the key is absent.
                 core::cmp::Ordering::Greater => return Ok(None),
@@ -196,8 +199,27 @@ impl<'a> Value<'a> {
     }
 }
 
+/// A deterministic key encoding that lookups compare against stored keys.
+pub trait EncodedKey {
+    /// Bytewise order of `stored` relative to this key.
+    fn cmp_stored(&self, stored: &[u8]) -> core::cmp::Ordering;
+}
+
+impl EncodedKey for [u8] {
+    /// Decides on the first byte when it differs: for strings shorter than 24 bytes that byte holds the length, so
+    /// most comparisons end there without a call to `memcmp`.
+    #[inline(always)]
+    fn cmp_stored(&self, stored: &[u8]) -> core::cmp::Ordering {
+        match (stored.split_first(), self.split_first()) {
+            (Some((a, ra)), Some((b, rb))) if a == b => ra.cmp(rb),
+            (Some((a, _)), Some((b, _))) => a.cmp(b),
+            _ => stored.cmp(self),
+        }
+    }
+}
+
 /// Body offset just past the item at `pos`.
-#[inline]
+#[inline(always)]
 pub fn end_of(d: &Datum, pos: usize) -> Result<usize> {
     // Fast path: scalars and strings end where their head says; containers and tags need the walk.
     let mut c = Cursor::at(d.body, pos);
@@ -247,7 +269,7 @@ fn end_of_nested(d: &Datum, pos: usize) -> Result<usize> {
 
 /// Array elements. Lazy: an element's end is only computed when moving past it.
 pub struct ArrayIter<'a> {
-    d: Datum<'a>,
+    d: &'a Datum<'a>,
     pos: usize,
     remaining: u64,
     last: Option<usize>,
@@ -257,7 +279,7 @@ impl<'a> ArrayIter<'a> {
     /// Moves past the previously returned item.
     fn advance(&mut self) -> Result<()> {
         if let Some(p) = self.last.take() {
-            self.pos = end_of(&self.d, p)?;
+            self.pos = end_of(self.d, p)?;
         }
         Ok(())
     }
@@ -281,7 +303,7 @@ impl<'a> Iterator for ArrayIter<'a> {
 
 /// Map entries. Lazy on values: a value's end is only computed when moving past it.
 pub struct MapIter<'a> {
-    d: Datum<'a>,
+    d: &'a Datum<'a>,
     pos: usize,
     remaining: u64,
     last_value: Option<usize>,
@@ -295,7 +317,7 @@ impl<'a> Iterator for MapIter<'a> {
         }
         let step = |it: &mut Self| -> Result<(Value<'a>, Value<'a>)> {
             if let Some(p) = it.last_value.take() {
-                it.pos = end_of(&it.d, p)?;
+                it.pos = end_of(it.d, p)?;
             }
             let k = Value { d: it.d, pos: it.pos };
             let v = Value { d: it.d, pos: k.end()? };
@@ -345,7 +367,8 @@ mod tests {
     fn array_access_agrees_with_and_without_index() {
         for n in [3u8, 15, 16, 40] {
             let s = stored(&int_array(n));
-            let root = Value::root(Datum::parse(&s).unwrap());
+            let root_d = Datum::parse(&s).unwrap();
+            let root = Value::root(&root_d);
             for i in -(i64::from(n)) - 1..=i64::from(n) {
                 let got = root.array_get(i).unwrap().map(|v| v.kind().unwrap());
                 let want = if i >= i64::from(n) || i < -(i64::from(n)) {
@@ -363,15 +386,16 @@ mod tests {
     fn map_lookup_finds_every_key_and_rejects_absent_ones() {
         for n in [3u8, 16, 50] {
             let s = stored(&int_map(n));
-            let root = Value::root(Datum::parse(&s).unwrap());
+            let root_d = Datum::parse(&s).unwrap();
+            let root = Value::root(&root_d);
             for i in 0..n {
                 let k = [0x18, i];
                 let k: &[u8] = if i < 24 { &k[1..] } else { &k };
                 let v = root.map_get(k).unwrap().expect("present");
                 assert_eq!(v.kind().unwrap(), Kind::Unsigned(u64::from(i.wrapping_add(100))));
             }
-            assert!(root.map_get(&[0x19, 0x01, 0x00]).unwrap().is_none());
-            assert!(root.map_get(&[0x60]).unwrap().is_none());
+            assert!(root.map_get(&[0x19u8, 0x01, 0x00][..]).unwrap().is_none());
+            assert!(root.map_get(&[0x60u8][..]).unwrap().is_none());
             assert_eq!(root.map_iter().unwrap().count(), n as usize);
         }
     }
@@ -384,7 +408,8 @@ mod tests {
         input.extend(int_map(40));
         input.push(0x07);
         let s = stored(&input);
-        let root = Value::root(Datum::parse(&s).unwrap());
+        let root_d = Datum::parse(&s).unwrap();
+        let root = Value::root(&root_d);
         assert_eq!(root.array_get(2).unwrap().unwrap().kind().unwrap(), Kind::Unsigned(7));
         let kinds: Vec<_> = root.array_iter().unwrap().map(|v| v.unwrap().kind().unwrap()).collect();
         assert_eq!(kinds, [Kind::Array(40), Kind::Map(40), Kind::Unsigned(7)]);

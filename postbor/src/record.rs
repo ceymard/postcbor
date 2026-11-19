@@ -214,7 +214,7 @@ fn cbor_populate_record(fcinfo: pg_sys::FunctionCallInfo) -> RawOut {
             let a = pgrx::fcinfo::pg_get_nullable_datum(fcinfo, 0);
             return RawOut((!a.isnull).then_some(a.value));
         };
-        let row = map_to_tuple(&Value::root(d), desc, base);
+        let row = map_to_tuple(&Value::root(&d), desc, base);
         crate::datum::release_tupdesc(desc);
         RawOut(Some(row))
     }
@@ -230,7 +230,7 @@ fn cbor_to_record(fcinfo: pg_sys::FunctionCallInfo) -> RawOut {
         }
         let desc = pg_sys::BlessTupleDesc(desc);
         let Some(d) = cbor_arg(fcinfo, 0) else { return RawOut(None) };
-        RawOut(Some(map_to_tuple(&Value::root(d), desc, None)))
+        RawOut(Some(map_to_tuple(&Value::root(&d), desc, None)))
     }
 }
 
@@ -242,7 +242,7 @@ unsafe fn recordset(fcinfo: pg_sys::FunctionCallInfo, arg: usize, base: Option<p
         let rsi = (*fcinfo).resultinfo as *mut pg_sys::ReturnSetInfo;
         let desc = (*rsi).setDesc;
         let Some(d) = cbor_arg(fcinfo, arg) else { return };
-        let v = Value::root(d);
+        let v = Value::root(&d);
         if !matches!(v.kind().or_raise(Source::Stored), Kind::Array(_)) {
             fail(PgSqlErrorCode::ERRCODE_INVALID_PARAMETER_VALUE, "cannot call this function on a non-array");
         }

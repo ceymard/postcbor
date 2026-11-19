@@ -10,15 +10,13 @@ use crate::access::{value_out, value_text};
 use crate::convert::finish_raw;
 use crate::datum::{Cbor, CborOut, PallocBuf, TextOut, VarlenaOut};
 use crate::error::{OrRaise, Source};
-use crate::io::{parse_datum, print_value};
+use crate::io::root;
+use crate::io::{parse_datum, parse_datum_in_context, print_value};
 
-fn root(c: Cbor<'_>) -> Value<'_> {
-    Value::root(parse_datum(c))
-}
 
 #[pg_extern(immutable, strict, parallel_safe)]
 fn cbor_typeof(c: Cbor<'_>) -> &'static str {
-    match root(c).kind().or_raise(Source::Stored) {
+    match root!(c).kind().or_raise(Source::Stored) {
         Kind::Unsigned(_) | Kind::Negative(_) => "integer",
         Kind::Float(_) => "float",
         Kind::Bytes(_) => "bytes",
@@ -35,7 +33,7 @@ fn cbor_typeof(c: Cbor<'_>) -> &'static str {
 
 #[pg_extern(immutable, strict, parallel_safe)]
 fn cbor_array_length(c: Cbor<'_>) -> i32 {
-    match root(c).kind().or_raise(Source::Stored) {
+    match root!(c).kind().or_raise(Source::Stored) {
         Kind::Array(n) => n as i32,
         _ => crate::error::fail(PgSqlErrorCode::ERRCODE_INVALID_PARAMETER_VALUE, "cannot get array length of a non-array"),
     }
@@ -44,7 +42,7 @@ fn cbor_array_length(c: Cbor<'_>) -> i32 {
 fn edn_text(c: Cbor<'_>, pretty: bool) -> TextOut {
     let d = parse_datum(c);
     let mut out = PallocBuf::varlena(d.body.len() * 2);
-    print_value(&Value::root(d), &mut out, pretty);
+    print_value(&Value::root(&d), &mut out, pretty);
     TextOut(VarlenaOut(out.into_varlena()))
 }
 
@@ -65,7 +63,7 @@ fn cbor_byte_length(c: Cbor<'_>) -> i64 {
 
 #[pg_extern(immutable, strict, parallel_safe)]
 fn cbor_tag(c: Cbor<'_>) -> Option<i64> {
-    match root(c).kind().or_raise(Source::Stored) {
+    match root!(c).kind().or_raise(Source::Stored) {
         Kind::Tag(t) => Some(i64::try_from(t).unwrap_or_else(|_| {
             crate::error::fail(PgSqlErrorCode::ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE, "tag number out of range for bigint")
         })),
@@ -75,7 +73,8 @@ fn cbor_tag(c: Cbor<'_>) -> Option<i64> {
 
 #[pg_extern(immutable, strict, parallel_safe)]
 fn cbor_untag(c: Cbor<'_>) -> CborOut {
-    let v = root(c);
+    let d = parse_datum(c);
+    let v = Value::root(&d);
     match v.kind().or_raise(Source::Stored) {
         Kind::Tag(_) => value_out(&v.tag_content().or_raise(Source::Stored)),
         _ => value_out(&v),
@@ -116,7 +115,7 @@ fn not_a(what: &str) -> ! {
 }
 
 fn entries<'a>(c: Cbor<'a>) -> impl Iterator<Item = (Value<'a>, Value<'a>)> + 'a {
-    let v = root(c);
+    let v = Value::root(parse_datum_in_context(c));
     if !matches!(v.kind().or_raise(Source::Stored), Kind::Map(_)) {
         not_a("map");
     }
@@ -124,7 +123,7 @@ fn entries<'a>(c: Cbor<'a>) -> impl Iterator<Item = (Value<'a>, Value<'a>)> + 'a
 }
 
 fn elements<'a>(c: Cbor<'a>) -> impl Iterator<Item = Value<'a>> + 'a {
-    let v = root(c);
+    let v = Value::root(parse_datum_in_context(c));
     if !matches!(v.kind().or_raise(Source::Stored), Kind::Array(_)) {
         not_a("array");
     }
@@ -167,6 +166,6 @@ fn cbor_pack(c: Cbor<'_>, format: default!(&str, "'cbor-x'")) -> crate::datum::B
     };
     let d = parse_datum(c);
     let mut out = PallocBuf::varlena(d.body.len());
-    pack(&Value::root(d), fmt, &mut out).or_raise(Source::Stored);
+    pack(&Value::root(&d), fmt, &mut out).or_raise(Source::Stored);
     crate::datum::ByteaOut(VarlenaOut(out.into_varlena()))
 }

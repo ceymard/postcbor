@@ -50,7 +50,7 @@ Every byte that comes from a user is hostile. The core is where it is parsed, so
 - Functions that sorts or hash joins call repeatedly (comparison, hashing) free their detoasted copies with `Cbor::free_copy`.
 - Get the `cbor` type OID from `datum::cbor_oid()` (schema-independent, invalidated on `pg_type` changes), or from the call site when one is at hand.
 - Byte-level logic belongs in the core. The glue converts PostgreSQL types, registers SQL objects and raises errors.
-- A borrowed `cbor` value must outlive anything that borrows from it. For set-returning functions, keep the detoasted datum in the multi-call memory context.
+- A borrowed `cbor` value must outlive anything that borrows from it, and a core `Value` borrows its parsed `Datum`. Use `io::root!` for a value used within one statement; for set-returning functions, keep the detoasted datum and the parsed `Datum` in the multi-call memory context (`io::parse_datum_in_context`).
 
 # Tests
 

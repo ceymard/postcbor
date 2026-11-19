@@ -159,7 +159,7 @@ fn steps<'a>(subs: &'a [Sub], cbors: &'a [Option<Datum<'a>>]) -> Vec<Step<'a>> {
             (Sub::Text(t), _) => Step::Text(t),
             (Sub::Int(i), _) => Step::Int(*i),
             (Sub::Bytes(b), _) => Step::Bytes(b),
-            (Sub::Cbor(_), Some(d)) => Step::Typed(Value::root(*d)),
+            (Sub::Cbor(_), Some(d)) => Step::Typed(Value::root(d)),
             (Sub::Cbor(_), None) => Step::Int(0),
         })
         .collect()
@@ -178,7 +178,8 @@ fn parsed(subs: &[Sub]) -> Vec<Option<Datum<'_>>> {
 fn get(doc: pg_sys::Datum, subs: &[Sub]) -> Option<pg_sys::Datum> {
     // SAFETY: `doc` is a non-null cbor datum.
     let c = unsafe { Cbor::from_datum(doc, false) }?;
-    let root = Value::root(parse_datum(c));
+    let d = parse_datum(c);
+    let root = Value::root(&d);
     let cb = parsed(subs);
     let st = steps(subs, &cb);
     // Same walk as `#>`, extended to integer, byte and typed steps.
@@ -234,16 +235,15 @@ unsafe extern "C-unwind" fn assign(_state: *mut pg_sys::ExprState, op: *mut pg_s
     unsafe {
         let st = (*op).d.sbsref.state;
         let subs = subscripts(st);
-        let new_owned;
         let new: &[u8] = if (*st).replacenull {
             &CBOR_NULL_BODY
         } else {
             let c = Cbor::from_datum((*st).replacevalue, false).unwrap_or(crate::datum::cbor_bytes(&[]));
-            new_owned = parse_datum(c).body.to_vec();
-            &new_owned
+            parse_datum(c).body
         };
         let container = if *(*op).resnull { None } else { Cbor::from_datum(*(*op).resvalue, false) };
-        let root = container.map(|c| Value::root(parse_datum(c)));
+        let d = container.map(parse_datum);
+        let root = d.as_ref().map(Value::root);
         let cb = parsed(&subs);
         let path = steps(&subs, &cb);
         let out = crate::modify::build(container.map_or(0, |c| c.0.len()) + new.len(), |o, l| edit::assign(root.as_ref(), &path, new, o, l));

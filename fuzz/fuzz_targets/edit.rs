@@ -27,7 +27,8 @@ enum Op {
 
 fuzz_target!(|input: (Vec<u8>, Vec<u8>, Op)| {
     let (Some(a), Some(b)) = (postbor_fuzz::store(&input.0), postbor_fuzz::store(&input.1)) else { return };
-    let (va, vb) = (Value::root(Datum::parse(&a).unwrap()), Value::root(Datum::parse(&b).unwrap()));
+    let (da, db) = (Datum::parse(&a).unwrap(), Datum::parse(&b).unwrap());
+    let (va, vb) = (Value::root(&da), Value::root(&db));
     let mut out = Vec::new();
     let r = match &input.2 {
         Op::Concat => edit::concat(&va, &vb, &mut out, &postbor_fuzz::ctx().0),
@@ -38,7 +39,7 @@ fuzz_target!(|input: (Vec<u8>, Vec<u8>, Op)| {
         Op::Insert(p, after) => edit::set_path(&va, &steps(p), vb.d.body, SetMode::Insert { after: *after }, &mut out, &postbor_fuzz::ctx().0),
         Op::StripNulls(arr, undef) => edit::strip_nulls(&va, *arr, *undef, &mut out, &postbor_fuzz::ctx().0),
         Op::Contains => {
-            let _ = ops::contains(&va, &vb, &mut postbor_fuzz::ctx()).unwrap();
+            postbor_fuzz::check_contains(&va, &vb);
             return;
         }
         Op::Pack(ietf) => {

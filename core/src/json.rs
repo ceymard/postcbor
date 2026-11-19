@@ -105,7 +105,7 @@ pub fn print(v: &Value, out: &mut impl OutBuf, strict: bool) -> Result<()> {
         if opened {
             continue;
         }
-        pos = end_of(&v.d, pos)?;
+        pos = end_of(v.d, pos)?;
         if complete(&mut stack, out)? {
             return Ok(());
         }
@@ -157,7 +157,7 @@ mod tests {
         let mut d = Vec::new();
         edn::to_datum(text.as_bytes(), &mut d, &mut PlainCtx::default()).unwrap();
         let mut out = Vec::new();
-        print(&Value::root(Datum::parse(&d).unwrap()), &mut out, strict)?;
+        print(&Value::root(&Datum::parse(&d).unwrap()), &mut out, strict)?;
         Ok(String::from_utf8(out).unwrap())
     }
 

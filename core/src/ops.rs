@@ -3,67 +3,70 @@
 use crate::cursor::*;
 use crate::encode::head_bytes;
 use crate::error::{Error, ErrorKind, Result};
-use crate::value::{ArrayIter, Kind, MapIter, Value};
+use crate::value::{EncodedKey, Kind, Value, end_of};
 
-/// Inline capacity of [`Key`]: covers the keys of nearly every real map without a heap allocation.
-const KEY_INLINE: usize = 40;
-
-/// Deterministic encoding of a lookup key, built per operator call: inline when short, so `doc -> 'name'`
-/// allocates nothing.
-pub struct Key {
-    inline: [u8; KEY_INLINE],
-    len: usize,
-    heap: Vec<u8>,
+/// Deterministic encoding of a lookup key, as its head plus borrowed content: built per operator call without
+/// copying the key.
+#[derive(Clone, Copy)]
+pub struct Key<'k> {
+    head: [u8; 9],
+    head_len: usize,
+    content: &'k [u8],
 }
 
-impl core::ops::Deref for Key {
-    type Target = [u8];
-    fn deref(&self) -> &[u8] {
-        if self.heap.is_empty() { &self.inline[..self.len] } else { &self.heap }
+impl Key<'_> {
+    /// The encoding as one buffer, for edits that keep the keys.
+    pub fn to_vec(&self) -> Vec<u8> {
+        let head = self.head.get(..self.head_len).unwrap_or_default();
+        [head, self.content].concat()
     }
 }
 
-impl Key {
-    fn new(head: &[u8], content: &[u8]) -> Key {
-        let len = head.len() + content.len();
-        let mut k = Key { inline: [0; KEY_INLINE], len, heap: Vec::new() };
-        if len <= KEY_INLINE {
-            k.inline[..head.len()].copy_from_slice(head);
-            k.inline[head.len()..len].copy_from_slice(content);
-        } else {
-            k.heap.reserve_exact(len);
-            k.heap.extend_from_slice(head);
-            k.heap.extend_from_slice(content);
+impl EncodedKey for Key<'_> {
+    #[inline(always)]
+    fn cmp_stored(&self, stored: &[u8]) -> core::cmp::Ordering {
+        let head = self.head.get(..self.head_len).unwrap_or_default();
+        match stored.split_at_checked(head.len()) {
+            Some((sh, rest)) => {
+                // Heads are at most 9 bytes: compared inline; the content only when the heads match.
+                for (a, b) in sh.iter().zip(head) {
+                    if a != b {
+                        return a.cmp(b);
+                    }
+                }
+                rest.cmp(self.content)
+            }
+            None => stored.cmp(head),
         }
-        k
     }
+}
+
+fn key_with(major: u8, content: &[u8]) -> Key<'_> {
+    let mut head = [0u8; 9];
+    let head_len = head_bytes(major, content.len() as u64, &mut head);
+    Key { head, head_len, content }
 }
 
 /// Deterministic encoding of a text key, given as UTF-8 bytes.
-pub fn key_text(s: &(impl AsRef<[u8]> + ?Sized)) -> Key {
+pub fn key_text(s: &(impl AsRef<[u8]> + ?Sized)) -> Key<'_> {
     key_with(MAJOR_TEXT, s.as_ref())
 }
 
 /// Deterministic encoding of a byte-string key.
-pub fn key_bytes(b: &[u8]) -> Key {
+pub fn key_bytes(b: &[u8]) -> Key<'_> {
     key_with(MAJOR_BYTES, b)
 }
 
-fn key_with(major: u8, content: &[u8]) -> Key {
-    let mut h = [0u8; 9];
-    let n = head_bytes(major, content.len() as u64, &mut h);
-    Key::new(&h[..n], content)
-}
 
 /// Deterministic encoding of an integer key.
-pub fn key_int(i: i64) -> Key {
-    let mut h = [0u8; 9];
-    let n = if i >= 0 {
-        head_bytes(MAJOR_UNSIGNED, i as u64, &mut h)
+pub fn key_int(i: i64) -> Key<'static> {
+    let mut head = [0u8; 9];
+    let head_len = if i >= 0 {
+        head_bytes(MAJOR_UNSIGNED, i as u64, &mut head)
     } else {
-        head_bytes(MAJOR_NEGATIVE, (-1 - i) as u64, &mut h)
+        head_bytes(MAJOR_NEGATIVE, (-1 - i) as u64, &mut head)
     };
-    Key::new(&h[..n], &[])
+    Key { head, head_len, content: &[] }
 }
 
 /// `-> int`: array index (negative counts from the end) or integer map key.
@@ -143,12 +146,12 @@ pub fn exists_text(v: &Value, s: &(impl AsRef<[u8]> + ?Sized)) -> Result<bool> {
 }
 
 /// Key or element equal to the given deterministic encoding.
-pub fn exists_encoded(v: &Value, key: &[u8]) -> Result<bool> {
+pub fn exists_encoded(v: &Value, key: &(impl EncodedKey + ?Sized)) -> Result<bool> {
     match v.kind()? {
         Kind::Map(_) => Ok(v.map_get(key)?.is_some()),
         Kind::Array(_) => {
             for e in v.array_iter()? {
-                if e?.bytes()? == key {
+                if key.cmp_stored(e?.bytes()?).is_eq() {
                     return Ok(true);
                 }
             }
@@ -158,21 +161,23 @@ pub fn exists_encoded(v: &Value, key: &[u8]) -> Result<bool> {
     }
 }
 
-/// Containment frames: what the parent is waiting for.
-enum Frame<'a> {
-    /// Every entry of `b` must exist in `a` with a contained value.
-    Map { a: Value<'a>, b: MapIter<'a> },
-    /// Every element of `b` must be contained in some element of `a`.
-    Array { a: Value<'a>, b: ArrayIter<'a>, cur: Option<Value<'a>>, cands: ArrayIter<'a> },
+/// Containment frames: what the parent is waiting for. Positions only (the two values are fixed for the whole check),
+/// so frames are cheap to create and move.
+#[derive(Clone, Copy)]
+enum Frame {
+    /// Every remaining entry of map `b` must exist in map `a` with a contained value. `b_key` is the current
+    /// entry's key, `b_val` its value once the entry is being checked.
+    Map { a: usize, b_key: usize, b_val: usize, b_left: u64 },
+    /// Every remaining element of array `b` must be contained in some element of array `a`. `b_cur` is the current
+    /// element, `cand` the element of `a` being tried for it.
+    Array { a_first: usize, a_len: u64, b_cur: usize, b_left: u64, cand: usize, cand_left: u64 },
 }
 
 /// Outcome of starting a containment check.
-// Boxing the frame would allocate for every container pair.
-#[allow(clippy::large_enum_variant)]
-enum Step<'a> {
+enum Step {
     Decided(bool),
     /// The answer needs the entries of a container pair.
-    Open(Frame<'a>),
+    Open(Frame),
 }
 
 /// `a @> b` with jsonb semantics; tags contain tags of the same number with contained content.
@@ -181,13 +186,14 @@ pub fn contains(a: &Value, b: &Value, ctx: &mut impl crate::ctx::Ctx) -> Result<
     if a.head()?.0.major == MAJOR_ARRAY && !matches!(b.head()?.0.major, MAJOR_ARRAY | MAJOR_MAP) {
         return exists_encoded(a, b.bytes()?);
     }
-    let mut top = match start(a, b)? {
+    let (da, db) = (a.d, b.d);
+    let mut top = match start(*a, *b)? {
         Step::Decided(r) => return Ok(r),
         Step::Open(f) => f,
     };
     // Frames above `top`; one-level checks, the usual case, never allocate.
     let mut parents: Vec<Frame> = Vec::new();
-    // Result of `top`'s last child check; None right after it was opened.
+    // Result of `top`'s current child check; None when none is pending.
     let mut result: Option<bool> = None;
     // O(n·m) on arrays: stays cancellable.
     let mut steps: u32 = 0;
@@ -197,42 +203,56 @@ pub fn contains(a: &Value, b: &Value, ctx: &mut impl crate::ctx::Ctx) -> Result<
             ctx.check_interrupts();
         }
         let mut outcome: Option<bool> = None;
-        let mut child: Option<(Value, Value)> = None;
+        let mut child: Option<(usize, usize)> = None;
         match &mut top {
-            Frame::Map { a, b } => {
-                if result == Some(false) {
-                    outcome = Some(false);
-                } else {
-                    match b.next() {
-                        None => outcome = Some(true),
-                        Some(e) => {
-                            let (k, bv) = e?;
-                            match a.map_get(k.bytes()?)? {
-                                None => outcome = Some(false),
-                                Some(av) => child = Some((av, bv)),
-                            }
+            Frame::Map { a, b_key, b_val, b_left } => {
+                match result {
+                    Some(false) => outcome = Some(false),
+                    Some(true) => {
+                        // The end of the last entry is never needed: on deep values it costs a walk per level.
+                        *b_left -= 1;
+                        if *b_left > 0 {
+                            *b_key = end_of(db, *b_val)?;
+                        }
+                    }
+                    None => {}
+                }
+                if outcome.is_none() {
+                    if *b_left == 0 {
+                        outcome = Some(true);
+                    } else {
+                        let k = Value { d: db, pos: *b_key };
+                        *b_val = k.end()?;
+                        match (Value { d: da, pos: *a }).map_get(k.bytes()?)? {
+                            None => outcome = Some(false),
+                            Some(av) => child = Some((av.pos, *b_val)),
                         }
                     }
                 }
             }
-            Frame::Array { a, b, cur, cands } => {
-                if result == Some(true) {
-                    *cur = None;
-                }
-                if cur.is_none() {
-                    match b.next() {
-                        None => outcome = Some(true),
-                        Some(e) => {
-                            *cur = Some(e?);
-                            *cands = a.array_iter()?;
+            Frame::Array { a_first, a_len, b_cur, b_left, cand, cand_left } => {
+                match result {
+                    Some(true) => {
+                        *b_left -= 1;
+                        if *b_left > 0 {
+                            *b_cur = end_of(db, *b_cur)?;
+                            (*cand, *cand_left) = (*a_first, *a_len);
                         }
                     }
-                }
-                if let (None, Some(be)) = (outcome, *cur) {
-                    match cands.next() {
-                        None => outcome = Some(false),
-                        Some(c) => child = Some((c?, be)),
+                    Some(false) => {
+                        *cand_left -= 1;
+                        if *cand_left > 0 {
+                            *cand = end_of(da, *cand)?;
+                        }
                     }
+                    None => {}
+                }
+                if *b_left == 0 {
+                    outcome = Some(true);
+                } else if *cand_left == 0 {
+                    outcome = Some(false);
+                } else {
+                    child = Some((*cand, *b_cur));
                 }
             }
         }
@@ -243,8 +263,8 @@ pub fn contains(a: &Value, b: &Value, ctx: &mut impl crate::ctx::Ctx) -> Result<
                 Some(p) => top = p,
             }
             result = Some(o);
-        } else if let Some((ca, cb)) = child {
-            match start(&ca, &cb)? {
+        } else if let Some((pa, pb)) = child {
+            match start(Value { d: da, pos: pa }, Value { d: db, pos: pb })? {
                 Step::Decided(r) => result = Some(r),
                 Step::Open(f) => parents.push(core::mem::replace(&mut top, f)),
             }
@@ -253,23 +273,22 @@ pub fn contains(a: &Value, b: &Value, ctx: &mut impl crate::ctx::Ctx) -> Result<
 }
 
 /// Starts checking that `a` contains `b`: decides scalars directly, opens a frame for containers.
-fn start<'a>(a: &Value<'a>, b: &Value<'a>) -> Result<Step<'a>> {
-    let (mut a, mut b) = (*a, *b);
+#[inline]
+fn start(mut a: Value, mut b: Value) -> Result<Step> {
     loop {
-        let ((ha, _), (hb, _)) = (a.head()?, b.head()?);
-        return match (ha.major, hb.major) {
-            (MAJOR_MAP, MAJOR_MAP) => Ok(Step::Open(Frame::Map { a, b: b.map_iter()? })),
+        let ((ha, fa), (hb, fb)) = (a.head()?, b.head()?);
+        return Ok(match (ha.major, hb.major) {
+            (MAJOR_MAP, MAJOR_MAP) => Step::Open(Frame::Map { a: a.pos, b_key: fb, b_val: fb, b_left: hb.arg }),
             (MAJOR_ARRAY, MAJOR_ARRAY) => {
-                Ok(Step::Open(Frame::Array { a, b: b.array_iter()?, cur: None, cands: a.array_iter()? }))
+                Step::Open(Frame::Array { a_first: fa, a_len: ha.arg, b_cur: fb, b_left: hb.arg, cand: fa, cand_left: ha.arg })
             }
             (MAJOR_TAG, MAJOR_TAG) if ha.arg == hb.arg => {
-                a = a.tag_content()?;
-                b = b.tag_content()?;
+                (a.pos, b.pos) = (fa, fb);
                 continue;
             }
-            (MAJOR_MAP | MAJOR_ARRAY | MAJOR_TAG, _) | (_, MAJOR_MAP | MAJOR_ARRAY | MAJOR_TAG) => Ok(Step::Decided(false)),
-            _ => Ok(Step::Decided(a.bytes()? == b.bytes()?)),
-        };
+            (MAJOR_MAP | MAJOR_ARRAY | MAJOR_TAG, _) | (_, MAJOR_MAP | MAJOR_ARRAY | MAJOR_TAG) => Step::Decided(false),
+            _ => Step::Decided(a.bytes()? == b.bytes()?),
+        });
     }
 }
 
@@ -288,7 +307,7 @@ mod tests {
 
     fn with<R>(a: &str, b: &str, f: impl FnOnce(&Value, &Value) -> R) -> R {
         let (sa, sb) = (st(a), st(b));
-        f(&Value::root(Datum::parse(&sa).unwrap()), &Value::root(Datum::parse(&sb).unwrap()))
+        f(&Value::root(&Datum::parse(&sa).unwrap()), &Value::root(&Datum::parse(&sb).unwrap()))
     }
 
     fn c(a: &str, b: &str) -> bool {
@@ -323,8 +342,42 @@ mod tests {
         let mut ctx = PlainCtx(crate::Limits { max_depth: depth + 1, ..Default::default() });
         let mut sa = Vec::new();
         edn::to_datum(a.as_bytes(), &mut sa, &mut ctx).unwrap();
-        let v = Value::root(Datum::parse(&sa).unwrap());
+        let v_d = Datum::parse(&sa).unwrap();
+        let v = Value::root(&v_d);
         assert!(contains(&v, &v, &mut PlainCtx::default()).unwrap());
+    }
+
+    #[test]
+    fn built_keys_order_and_find_like_their_encoding() {
+        let mut texts: Vec<String> = [0, 1, 5, 22, 23, 24, 25, 255, 256].iter().map(|&n| "k".repeat(n)).collect();
+        // Same length, different content: decided past the head, for 1-byte and 2-byte heads.
+        texts.extend(["a", "j", "z", "ab", "ba"].map(String::from));
+        texts.extend(["a".repeat(24), "z".repeat(24)]);
+        let mut keys: Vec<Key> = texts.iter().map(key_text).collect();
+        keys.extend([key_bytes(b""), key_bytes(b"k"), key_int(0), key_int(23), key_int(24), key_int(-1), key_int(i64::MIN)]);
+        let encoded: Vec<Vec<u8>> = keys.iter().map(Key::to_vec).collect();
+        // Includes stored keys shorter than the built key's head, and heads of different lengths.
+        for k in &keys {
+            for e in &encoded {
+                assert_eq!(k.cmp_stored(e), e.as_slice().cmp(&k.to_vec()), "{:x?} vs {e:x?}", k.to_vec());
+            }
+        }
+        // Maps holding the keys: a small one without an index section, and an indexed one.
+        let mut items: Vec<String> = texts.iter().map(|t| format!("\"{t}\": 1")).collect();
+        items.extend(["h'': 1", "h'6b': 1", "0: 1", "23: 1", "24: 1", "-1: 1", "-9223372036854775808: 1"].map(String::from));
+        items.extend((0..20).map(|i| format!("\"z{i}\": 2")));
+        for n in [8, items.len()] {
+            let mut d = Vec::new();
+            edn::to_datum(format!("{{{}}}", items[..n].join(", ")).as_bytes(), &mut d, &mut PlainCtx::default()).unwrap();
+            let pd = Datum::parse(&d).unwrap();
+            assert_eq!(pd.index.is_some(), n > 8);
+            let v = Value::root(&pd);
+            for k in keys.iter().take(n.min(keys.len())) {
+                assert!(v.map_get(k).unwrap().is_some(), "{:x?}", k.to_vec());
+            }
+            assert!(v.map_get(&key_text("kk")).unwrap().is_none());
+            assert!(v.map_get(&key_int(1)).unwrap().is_none());
+        }
     }
 
     #[test]

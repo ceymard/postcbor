@@ -14,7 +14,7 @@ fuzz_target!(|parts: (Vec<u8>, Vec<u8>, Vec<u8>)| {
         return;
     };
     let (da, db, dc) = (Datum::parse(&a).unwrap(), Datum::parse(&b).unwrap(), Datum::parse(&c).unwrap());
-    let (va, vb, vc) = (Value::root(da), Value::root(db), Value::root(dc));
+    let (va, vb, vc) = (Value::root(&da), Value::root(&db), Value::root(&dc));
     let ab = compare(&va, &vb).unwrap();
     assert_eq!(ab, compare(&vb, &va).unwrap().reverse(), "antisymmetry");
     assert_eq!(ab == Ordering::Equal, da.body == db.body, "equality must match bodies");

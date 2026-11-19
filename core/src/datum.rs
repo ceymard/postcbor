@@ -20,19 +20,27 @@ pub struct Datum<'a> {
 }
 
 impl<'a> Datum<'a> {
+    // Inlined: every operator call parses its arguments, and most values have no index section.
+    #[inline]
     pub fn parse(bytes: &'a [u8]) -> Result<Self> {
         let mut c = Cursor::new(bytes);
         let header = c.byte().map_err(|_| Error::new(ErrorKind::CorruptDatum, 0))?;
+        // Current version, no index section, no reserved bits.
+        if header == VERSION {
+            let body = c.take(c.remaining() as u64)?;
+            return Ok(Datum { body, index: None });
+        }
+        Self::parse_slow(bytes, header)
+    }
+
+    fn parse_slow(bytes: &'a [u8], header: u8) -> Result<Self> {
         if header & VERSION_MASK != VERSION {
             return Err(Error::new(ErrorKind::UnsupportedVersion, 0));
         }
         if header & RESERVED_MASK != 0 {
             return Err(Error::new(ErrorKind::CorruptDatum, 0));
         }
-        if header & HAS_INDEX == 0 {
-            let body = c.take(c.remaining() as u64)?;
-            return Ok(Datum { body, index: None });
-        }
+        let mut c = Cursor::at(bytes, 1);
         let len = bytes.len();
         let body_len = Cursor::u32_at(bytes, len.checked_sub(4).ok_or(Error::new(ErrorKind::CorruptDatum, 0))?)?;
         let body = c.take(u64::from(body_len)).map_err(|e| Error::new(ErrorKind::CorruptDatum, e.offset))?;
@@ -214,7 +222,7 @@ mod tests {
         let p = Datum::parse(&d).unwrap();
         let t = p.index.unwrap().table_for(0).unwrap().unwrap();
         assert!(!t.narrow);
-        let v = crate::value::Value::root(p);
+        let v = crate::value::Value::root(&p);
         for i in 0..20 {
             assert_eq!(v.array_get(i).unwrap().unwrap().pos, 1 + i as usize * 5003);
         }

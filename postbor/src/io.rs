@@ -3,7 +3,7 @@
 use core::ffi::CStr;
 
 use pgrx::prelude::*;
-use pgrx::{Internal, pg_sys};
+use pgrx::{Internal, PgMemoryContexts, pg_sys};
 use postbor_core::datum::{self, Datum};
 use postbor_core::edn::{self, PrintOpts};
 use postbor_core::value::Value;
@@ -61,6 +61,23 @@ pub fn parse_datum(c: Cbor<'_>) -> Datum<'_> {
     d
 }
 
+/// Root value of a `cbor` argument. Its parsed datum is a temporary that lives until the end of the enclosing
+/// statement; bind `parse_datum` to a local instead when the value must outlive it.
+macro_rules! root {
+    ($c:expr) => {
+        postbor_core::value::Value::root(&$crate::io::parse_datum($c))
+    };
+}
+pub(crate) use root;
+
+/// [`parse_datum`] for values that must outlive the call's locals (set-returning iterators): the parsed datum is
+/// stored in the current memory context, like the detoasted bytes it points into.
+pub fn parse_datum_in_context(c: Cbor<'_>) -> &Datum<'_> {
+    let p = PgMemoryContexts::CurrentMemoryContext.leak_and_drop_on_delete(parse_datum(c));
+    // SAFETY: the allocation lives until the current memory context is reset, which outlives this call's result.
+    unsafe { &*p }
+}
+
 /// Debug builds: every stored datum must be exactly what normalizing its body gives (header and index included).
 #[cfg(debug_assertions)]
 fn revalidate(bytes: &[u8], d: &Datum) {
@@ -86,7 +103,7 @@ fn cbor_in(input: &CStr) -> CborOut {
 fn cbor_out(c: Cbor<'_>) -> &'static CStr {
     let d = parse_datum(c);
     let mut out = PallocBuf::cstring(d.body.len() * 2);
-    print_value(&Value::root(d), &mut out, false);
+    print_value(&Value::root(&d), &mut out, false);
     out.into_cstr()
 }
 

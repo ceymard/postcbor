@@ -141,7 +141,7 @@ mod tests {
     fn dec(text: &str) -> Option<String> {
         let mut d = Vec::new();
         edn::to_datum(text.as_bytes(), &mut d, &mut PlainCtx::default()).unwrap();
-        to_decimal(&Value::root(Datum::parse(&d).unwrap())).unwrap()
+        to_decimal(&Value::root(&Datum::parse(&d).unwrap())).unwrap()
     }
 
     fn back(text: &str, f: fn(&str, &mut Vec<u8>) -> Result<()>) -> String {
@@ -150,7 +150,7 @@ mod tests {
         let mut d = Vec::new();
         crate::datum::from_body(&body, &mut d, usize::MAX).unwrap();
         let mut out = Vec::new();
-        edn::print(&Value::root(Datum::parse(&d).unwrap()), &mut out, Default::default()).unwrap();
+        edn::print(&Value::root(&Datum::parse(&d).unwrap()), &mut out, Default::default()).unwrap();
         String::from_utf8(out).unwrap()
     }
 
