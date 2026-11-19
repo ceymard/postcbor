@@ -1,11 +1,6 @@
 //! Builders (`cbor_build_*`, `cbor_object`) and aggregates (`cbor_agg*`, `cbor_object_agg*`), design §8.
 //! `VARIADIC "any"` and aggregate states need the raw function-call interface, so their SQL is written here.
 
-use pgrx::callconv::{BoxRet, FcInfo};
-use pgrx::datum::Datum as PgDatum;
-use pgrx::pgrx_sql_entity_graph::metadata::{
-    ArgumentError, ReturnsError, ReturnsRef, SqlMappingRef, SqlTranslatable, TypeOrigin,
-};
 use pgrx::prelude::*;
 use pgrx::{PgMemoryContexts, pg_sys};
 use postbor_core::cursor::MAJOR_TEXT;
@@ -14,7 +9,7 @@ use postbor_core::normalize::Duplicates;
 use postbor_core::{OutBuf, datum};
 
 use crate::convert::{datum_to_cbor, finish_raw};
-use crate::datum::{CborOut, PallocBuf};
+use crate::datum::{CborOut, InternalOut, PallocBuf};
 use crate::error::{OrRaise, Source, fail};
 use crate::settings::PgCtx;
 
@@ -132,23 +127,6 @@ fn cbor_object_keys_values(keys: Array<'_, &str>, values: Array<'_, &str>) -> Cb
 /// Aggregate state: raw CBOR of an indefinite array or map under construction, in the aggregate memory context.
 struct AggState {
     raw: PallocBuf,
-}
-
-/// The `internal` aggregate state passed between transition calls.
-pub struct InternalOut(pg_sys::Datum);
-
-unsafe impl BoxRet for InternalOut {
-    unsafe fn box_into<'fcx>(self, fcinfo: &mut FcInfo<'fcx>) -> PgDatum<'fcx> {
-        // SAFETY: the pointer lives in the aggregate memory context.
-        unsafe { fcinfo.return_raw_datum(self.0) }
-    }
-}
-
-unsafe impl SqlTranslatable for InternalOut {
-    const TYPE_IDENT: &'static str = pgrx::pgrx_resolved_type!(InternalOut);
-    const TYPE_ORIGIN: TypeOrigin = TypeOrigin::External;
-    const ARGUMENT_SQL: Result<SqlMappingRef, ArgumentError> = Ok(SqlMappingRef::literal("internal"));
-    const RETURN_SQL: Result<ReturnsRef, ReturnsError> = Ok(ReturnsRef::One(SqlMappingRef::literal("internal")));
 }
 
 /// The state from argument 0, created on the first call with `opener` as its first byte.

@@ -11,7 +11,7 @@ This is the reference specification. Terms are defined in `CONTEXT.md`, and the 
 
 Phases:
 1. I/O, casts, operators, btree and hash operator classes, subscripting, every non-path function.
-2. GIN operator classes. These need their own design session first; phase 1 only has to provide a walk that yields typed (path, value) pairs.
+2. GIN operator classes (`cbor_ops`, `cbor_path_ops`).
 3. Path queries over the core `jsonpath` type ([ADR-0008](../adr/0008-path-queries-reuse-jsonpath.md)).
 
 ## 2. Threat model and limits
@@ -252,7 +252,28 @@ These use different names rather than overloads because function overloads `(cbo
 
 Selectivity estimators: `matchingsel`/`matchingjoinsel` for `@> <@ ? ?| ?& ?# ?#| ?#&`; `eqsel`/`scalarltsel` etc. for comparisons.
 
-Operator classes: btree `cbor_ops` (default) and hash `cbor_ops` (default, with an extended hash function). GIN classes come in phase 2.
+Operator classes: btree `cbor_ops` (default) and hash `cbor_ops` (default, with an extended hash function), and the GIN classes below.
+
+### GIN indexes
+
+Two operator classes, as for jsonb. Both are lossy: every match is rechecked against the row.
+
+| Class | Operators | Entries | Storage |
+|---|---|---|---|
+| `cbor_ops` (default) | `@>` `?` `?\|` `?&` `?#` `?#\|` `?#&` | One per map key and one per atomic item, without their position | `bytea` |
+| `cbor_path_ops` | `@>` | One per atomic item: a hash of the path leading to it and of the item | `int4` |
+
+Both come from one walk over the value (core `gin`), in body order:
+- **Atomic item**: one that containment compares whole: a scalar, a tag whose content (through further tags) is atomic, or a decimal fraction or bigfloat (tags 4, 5). Arrays, maps and other tags around them are walked into.
+- **`cbor_ops` entry**: a role byte, then the item's deterministic encoding. Role 1 (key) for map keys, of any type and whole, and for array elements and the top-level value; role 2 for map values. Sharing the key role lets `?` find array elements, as jsonb does. An item whose encoding is 125 bytes or longer gets instead the role with bit 7 set and a 4-byte hash of the encoding.
+- **`cbor_path_ops` entry**: a 32-bit hash over the path steps and the item: each map key's encoding and each walked tag's number, with a marker byte per step kind. Arrays add no step, since array containment ignores positions; so `[1, 2] @> 1` holds for the index too. The hash is FNV-1a with a final mix.
+- Entries are on disk: changing the walk, the roles or the hashes requires a REINDEX.
+
+Queries:
+- `@>`: the query value's own entries; the row must have all of them. A query with no entries (`{}`, `[]`, `{"a": {}}`) scans the whole index and rechecks every row.
+- `?`, `?|`, `?&`: the key-role entry of each text key. `?&` with no keys matches every row; `?|` with none matches no row.
+- `?#`, `?#|`, `?#&`: the key-role entry of each key. A key that is not atomic cannot be found among array elements through entries, so `?#` with such a key, or `?#|` with any such key, rechecks every row; `?#&` skips such keys.
+- Strategy numbers: 7 `@>`, 9 `?`, 10 `?|`, 11 `?&` (jsonb's), 12 `?#`, 13 `?#|`, 14 `?#&`.
 
 ### Subscripting
 
@@ -353,16 +374,18 @@ Cargo workspace, crates fetched from crates.io:
 
 - **`core/` (`postbor-core`)**: pure Rust, no dependencies, `#![forbid(unsafe_code)]`. Every byte-level operation lives here.
   - `cursor`: the only code that indexes into input or body bytes. Every read is bounds-checked and returns `Result`.
-  - `normalize`: input bytes → body + index section, including unpacking (`pack` submodule).
-  - `writer`: the deterministic encoder. Builds the index section as it writes. It is also the builder behind `to_cbor`, `cbor_build_*` and aggregates.
-  - `index`: lookup in the directory and entry tables, and rebasing when extracting.
-  - `value`: borrowed views (`Value<'a>`) over a body slice, and iterators (`ArrayIter<'a>`, `MapIter<'a>`).
+  - `normalize`: input bytes → deterministic body, including unpacking (`pack`).
+  - `pack`: unpacking packed input, and `cbor_pack`.
+  - `encode`: shortest-form heads. `float`: float widths. `bigint`, `num`: bignums and decimal text for `numeric`.
+  - `datum`: the stored form (header, body, index section); `index`: building and reading the index section, and rebasing it when extracting.
+  - `value`: borrowed views (`Value<'a>`, which borrows its parsed `Datum`) and lazy iterators (`ArrayIter<'a>`, `MapIter<'a>`).
   - `edn`: parser and printer.
   - `cmp`: ordering, and the input to hashing.
-  - `ops`: containment, path get/set/insert/delete, concatenation, strip_nulls, `?` checks.
+  - `ops`: lookups, paths, containment and `?` checks. `edit`: operations that build a new value (concatenation, deletion, set/insert, strip_nulls).
   - `json`: the decision logic for converting to and from JSON. Building and reading the actual jsonb values happens in the glue.
-  - `walk`: yields typed (path, value) pairs, for GIN in phase 2.
-- **`postbor/`**: the pgrx `cdylib`. It holds the SQL definitions, the conversions to and from PostgreSQL types, the settings, and turning core errors into `ereport` calls. `unsafe` is allowed only where raw PostgreSQL APIs are unavoidable: `datum` (varlena wrapper, `PallocBuf`), `io` (receive buffer, encoding conversion), `convert` (`to_cbor` over any type: arrays, composites, catalog lookups), `build` (`VARIADIC "any"` and aggregate states), `record` (row construction), `subscript`, and later `gin`. Each `unsafe` block carries a one-line comment stating its invariant.
+  - `gin`: the walk over a value's keys and atomic items, and the GIN entries built from it.
+  - `ctx`, `out`, `error`: limits and interrupt checks, the output buffer trait, errors.
+- **`postbor/`**: the pgrx `cdylib`. It holds the SQL definitions, the conversions to and from PostgreSQL types, the settings, and turning core errors into `ereport` calls. `unsafe` is allowed only where raw PostgreSQL APIs are unavoidable: `datum` (varlena wrapper, `PallocBuf`), `io` (receive buffer, encoding conversion), `convert` (`to_cbor` over any type: arrays, composites, catalog lookups), `build` (`VARIADIC "any"` and aggregate states), `record` (row construction), `subscript`, and `gin` (GIN support functions). Each `unsafe` block carries a one-line comment stating its invariant.
 - **jsonb conversion** goes through JSON text: `cbor → jsonb` prints JSON with the core's `json` module and calls `jsonb_in`; `jsonb/json → cbor` reads `jsonb_out`/`json_out` text with the EDN parser (JSON is a subset of EDN). Replace with direct `JsonbValue` building only if benchmarks show it matters.
 - **`fuzz/`**: cargo-fuzz targets. Depends only on `postbor-core`. Not part of the default workspace build.
 

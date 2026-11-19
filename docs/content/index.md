@@ -81,4 +81,15 @@ All three can only be changed by superusers.
 
 ## Not yet available
 
-GIN indexes and path queries (`@?`, `@@`, `cbor_path_*`) are planned; see `TODO.md`.
+## Indexes
+
+btree and hash indexes work as for any type. GIN indexes work as for jsonb:
+
+```sql
+CREATE INDEX ON docs USING gin (d);                  -- cbor_ops: @>, ?, ?|, ?&, ?#, ?#|, ?#&
+CREATE INDEX ON docs USING gin (d cbor_path_ops);    -- @> only; smaller and more selective
+```
+
+`cbor_ops` indexes keys and values separately, so it also answers key existence. `cbor_path_ops` indexes each value together with the keys leading to it. Keys and values keep their CBOR type: `1`, `"1"` and `1.0` are different entries.
+
+Path queries (`@?`, `@@`, `cbor_path_*`) are planned; see `TODO.md`.

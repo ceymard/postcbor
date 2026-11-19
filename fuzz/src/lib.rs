@@ -72,6 +72,51 @@ pub fn check_contains(a: &Value, b: &Value) {
     let got = postbor_core::ops::contains(a, b, &mut ctx()).unwrap();
     assert_eq!(got, contains_ref(a, b, true), "containment disagrees with the reference");
     assert!(postbor_core::ops::contains(a, a, &mut ctx()).unwrap(), "a value does not contain itself");
+    if got {
+        check_index_entries(a, b);
+    }
+    // Values contained by construction: each of a's first map entries as a one-entry map, or element in an array.
+    let parts: Vec<Vec<u8>> = match a.kind().unwrap() {
+        Kind::Map(_) => a.map_iter().unwrap().take(4).map(|e| {
+            let (k, v) = e.unwrap();
+            [&[0xa1][..], k.bytes().unwrap(), v.bytes().unwrap()].concat()
+        }).collect(),
+        Kind::Array(_) => a.array_iter().unwrap().take(4).map(|e| [&[0x81][..], e.unwrap().bytes().unwrap()].concat()).collect(),
+        _ => Vec::new(),
+    };
+    for p in parts {
+        let Some(stored) = store(&p) else { continue };
+        let d = Datum::parse(&stored).unwrap();
+        let sub = Value::root(&d);
+        assert!(postbor_core::ops::contains(a, &sub, &mut ctx()).unwrap(), "a value does not contain its own entry");
+        check_index_entries(a, &sub);
+    }
+}
+
+/// A GIN index must never miss a match: the entries of a contained value are entries of its container.
+fn check_index_entries(a: &Value, b: &Value) {
+    use postbor_core::gin;
+    let ops = |v: &Value| {
+        let mut out = std::collections::HashSet::new();
+        gin::ops_entries(v, |e| {
+            let (x, y) = e.parts();
+            out.insert([x, y].concat());
+            Ok(())
+        })
+        .unwrap();
+        out
+    };
+    let paths = |v: &Value| {
+        let mut out = std::collections::HashSet::new();
+        gin::path_entries(v, |h| {
+            out.insert(h);
+            Ok(())
+        })
+        .unwrap();
+        out
+    };
+    assert!(ops(b).is_subset(&ops(a)), "cbor_ops entries of a contained value are missing");
+    assert!(paths(b).is_subset(&paths(a)), "cbor_path_ops entries of a contained value are missing");
 }
 
 /// Reference containment. Recursive: fuzz values are limited to depth 64.

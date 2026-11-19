@@ -5,6 +5,7 @@
 mod datum;
 mod error;
 mod funcs;
+mod gin;
 mod access;
 mod build;
 mod compare;

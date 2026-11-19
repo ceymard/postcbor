@@ -262,6 +262,13 @@ pub unsafe fn varsize_4b(v: *const u8) -> u32 {
     if cfg!(target_endian = "little") { (h >> 2) & 0x3fff_ffff } else { h & 0x3fff_ffff }
 }
 
+/// A 4-byte varlena header for a value of `total` bytes (header included), as SET_VARSIZE writes it.
+pub fn varlena_header(total: usize) -> [u8; 4] {
+    let total = total as u32;
+    let h = if cfg!(target_endian = "little") { total << 2 } else { total & 0x3fff_ffff };
+    h.to_ne_bytes()
+}
+
 /// Output buffer in `palloc` memory of the current context, with room for a varlena header when `hdr` is 4.
 pub struct PallocBuf {
     ptr: *mut u8,
@@ -289,6 +296,16 @@ impl PallocBuf {
         Self::with_header(0, capacity)
     }
 
+    /// For raw blocks returned through `internal` (GIN entries).
+    pub fn raw(capacity: usize) -> Self {
+        Self::with_header(0, capacity)
+    }
+
+    /// The block, valid until its memory context is reset.
+    pub fn into_ptr(self) -> *mut u8 {
+        self.ptr
+    }
+
     fn reserve(&mut self, extra: usize) -> Result<()> {
         let need = self.len.checked_add(extra).ok_or(Error::new(ErrorKind::TooLarge, self.len))?;
         if need <= self.cap {
@@ -308,11 +325,9 @@ impl PallocBuf {
     pub fn into_varlena(self) -> *mut pg_sys::varlena {
         debug_assert_eq!(self.hdr, VARHDRSZ);
         let v = self.ptr as *mut pg_sys::varlena;
-        let total = (self.hdr + self.len) as u32;
-        // 4-byte varlena header, as SET_VARSIZE writes it.
-        let header = if cfg!(target_endian = "little") { total << 2 } else { total & 0x3fff_ffff };
+        let header = varlena_header(self.hdr + self.len);
         // SAFETY: the block starts with VARHDRSZ reserved bytes followed by `len` payload bytes.
-        unsafe { ptr::write_unaligned(self.ptr as *mut u32, header) };
+        unsafe { ptr::copy_nonoverlapping(header.as_ptr(), self.ptr, VARHDRSZ) };
         v
     }
 
@@ -349,6 +364,18 @@ impl OutBuf for PallocBuf {
         self.len = self.len.min(len);
     }
 }
+
+/// An `internal` result: a pointer the caller knows how to read (aggregate states, GIN entry arrays).
+pub struct InternalOut(pub pg_sys::Datum);
+
+unsafe impl BoxRet for InternalOut {
+    unsafe fn box_into<'fcx>(self, fcinfo: &mut FcInfo<'fcx>) -> PgDatum<'fcx> {
+        // SAFETY: the pointer lives in a memory context that outlives the call (aggregate or index build/scan).
+        unsafe { fcinfo.return_raw_datum(self.0) }
+    }
+}
+
+sql_type!(InternalOut, "internal", TypeOrigin::External);
 
 /// A datum passed through untouched, typed for SQL as `$sql`.
 macro_rules! raw_datum {

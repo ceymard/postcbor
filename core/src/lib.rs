@@ -12,6 +12,7 @@ pub mod edn;
 pub mod encode;
 pub mod error;
 pub mod float;
+pub mod gin;
 pub mod index;
 pub mod json;
 pub mod normalize;

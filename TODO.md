@@ -26,7 +26,7 @@ Notes from implementation:
 - [x] `edn`: parser and printer (§5). Property fuzz target for the EDN round trip.
 - [x] `ops`: path get, containment, `?` family, concatenation, delete, set/insert (`create_if_missing`, `insert_after`), set_lax, strip_nulls.
 - [x] `json`: conversion rules for both directions (§8 casts, ADR-0009).
-- [ ] `walk`: typed (path, value) pairs (needed by phase 2).
+- [x] `walk`: `gin::walk` (map keys, atomic items and their path).
 - [x] Fuzz targets: normalize, EDN parse, and the properties of §10. Seed corpus from RFC 8949 Appendix A.
 - [x] `cbor2` cross-check script (test-only): `uv run --with cbor2 tests/crosscheck.py [count]`.
 - [x] Packing: unpack the schemes in design §6, with limits and cycle detection; `pack` output for both formats. Property: normalization is idempotent.
@@ -64,15 +64,17 @@ Notes from implementation:
 ## Promised in the design, not done yet
 
 - [x] Debug builds re-validating every stored datum they read (design §2): `io::parse_datum` re-normalizes and compares; every pg_regress run uses it.
-- [ ] `walk` in the core (typed path/value pairs; needed by phase 2).
+- [x] `walk` in the core: `gin::walk`.
 - [x] Combine/serialize functions for the aggregates (parallel aggregation), tested with a forced parallel plan.
 - [x] cbor-x compatibility checked against real cbor-x 1.6.7, both directions (`make cborx-check CBORX_NODE_MODULES=…`). Found and fixed: record ids beyond 256, empty maps and more than 8191 shapes in `cbor_pack`.
 - [x] Interrupt checks in long operations: normalization, unpacking and containment through `Ctx`; comparison, EDN/JSON printing and strip_nulls through the core's interrupt hook (`ctx::Ticker`).
 
 ## Phase 2: GIN
 
-- [ ] Design session with the user: key forms (`cbor_ops` / `cbor_path_ops`), non-text keys, tags, hashing.
-- [ ] Implement, test and document.
+- [x] Design (with the user, 2026-11-19): `cbor_ops` and `cbor_path_ops` like jsonb's; `?#`, `?#|`, `?#&` operators so typed keys are indexable; tags 4 and 5 compared whole in containment, other tags walked into (path steps in `cbor_path_ops`).
+- [x] Core `gin`: walk over keys and atomic items, entries for both classes; tests that contained values have a subset of entries; fuzzed (`edit` target: contained values derived from each input).
+- [x] Support functions and operator classes; `gin` suite: every query gives the same rows through the index as by a sequential scan, and uses the index.
+- [ ] Benchmark index size and query time against jsonb's classes.
 
 ## Phase 3: path queries
 
