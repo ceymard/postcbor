@@ -5,7 +5,7 @@ use postbor_core::edit::{self, SetMode, Step};
 use postbor_core::ops::{key_bytes, key_text};
 use postbor_core::value::Value;
 
-use crate::datum::{ByteaArg, Cbor, CborOut, PallocBuf, TextArg};
+use crate::datum::{ByteaArg, Cbor, CborOut, PallocBuf, TextArg, TextArray};
 use crate::error::{OrRaise, Source};
 use crate::io::root;
 use crate::settings::PgCtx;
@@ -42,7 +42,7 @@ fn cbor_delete_text(doc: Cbor<'_>, key: TextArg<'_>) -> CborOut {
 
 #[pg_operator(immutable, strict, parallel_safe, name = "cbor_delete")]
 #[opname(-)]
-fn cbor_delete_texts(doc: Cbor<'_>, keys: Array<'_, &str>) -> CborOut {
+fn cbor_delete_texts(doc: Cbor<'_>, keys: TextArray<'_>) -> CborOut {
     let keys: Vec<Vec<u8>> = keys.iter().flatten().map(|k| key_text(k).to_vec()).collect();
     build(doc.0.len(), |o, l| edit::delete_matching(&root!(doc), &keys, o, l))
 }
@@ -80,14 +80,14 @@ fn typed_steps<'a>(path: &Value<'a>) -> Vec<Step<'a>> {
 }
 
 /// Text path steps; a NULL step makes the whole operation a no-op, as in jsonb.
-fn with_text_path<R>(path: Array<'_, &str>, f: impl FnOnce(Option<&[Step]>) -> R) -> R {
+fn with_text_path<R>(path: TextArray<'_>, f: impl FnOnce(Option<&[Step]>) -> R) -> R {
     let steps: Option<Vec<Step>> = path.iter().map(|s| s.map(Step::Text)).collect();
     f(steps.as_deref())
 }
 
 #[pg_operator(immutable, strict, parallel_safe)]
 #[opname(#-)]
-fn cbor_delete_text_path(doc: Cbor<'_>, path: Array<'_, &str>) -> CborOut {
+fn cbor_delete_text_path(doc: Cbor<'_>, path: TextArray<'_>) -> CborOut {
     with_text_path(path, |steps| match steps {
         Some(s) => build(doc.0.len(), |o, l| edit::delete_path(&root!(doc), s, o, l)),
         None => build(doc.0.len(), |o, _| edit::copy_value(&root!(doc), o)),
@@ -102,7 +102,7 @@ fn cbor_delete_path(doc: Cbor<'_>, path: Cbor<'_>) -> CborOut {
     build(doc.0.len(), |o, l| edit::delete_path(&root!(doc), &steps, o, l))
 }
 
-fn set_text(target: Cbor<'_>, path: Array<'_, &str>, new: Cbor<'_>, mode: SetMode) -> CborOut {
+fn set_text(target: Cbor<'_>, path: TextArray<'_>, new: Cbor<'_>, mode: SetMode) -> CborOut {
     let newbody = parse_datum(new).body;
     with_text_path(path, |steps| match steps {
         Some(s) => build(target.0.len() + newbody.len(), |o, l| edit::set_path(&root!(target), s, newbody, mode, o, l)),
@@ -125,7 +125,7 @@ fn set_typed(target: Cbor<'_>, path: Cbor<'_>, new: Cbor<'_>, mode: SetMode) -> 
 }
 
 #[pg_extern(immutable, strict, parallel_safe)]
-fn cbor_set(target: Cbor<'_>, path: Array<'_, &str>, new_value: Cbor<'_>, create_if_missing: default!(bool, true)) -> CborOut {
+fn cbor_set(target: Cbor<'_>, path: TextArray<'_>, new_value: Cbor<'_>, create_if_missing: default!(bool, true)) -> CborOut {
     set_text(target, path, new_value, SetMode::Set { create: create_if_missing })
 }
 
@@ -135,7 +135,7 @@ fn cbor_set_path(target: Cbor<'_>, path: Cbor<'_>, new_value: Cbor<'_>, create_i
 }
 
 #[pg_extern(immutable, strict, parallel_safe)]
-fn cbor_insert(target: Cbor<'_>, path: Array<'_, &str>, new_value: Cbor<'_>, insert_after: default!(bool, false)) -> CborOut {
+fn cbor_insert(target: Cbor<'_>, path: TextArray<'_>, new_value: Cbor<'_>, insert_after: default!(bool, false)) -> CborOut {
     set_text(target, path, new_value, SetMode::Insert { after: insert_after })
 }
 
@@ -173,7 +173,7 @@ const CBOR_NULL: [u8; 2] = [0x00, 0xf6];
 #[pg_extern(immutable, parallel_safe)]
 fn cbor_set_lax(
     target: Option<Cbor<'_>>,
-    path: Option<Array<'_, &str>>,
+    path: Option<TextArray<'_>>,
     new_value: Option<Cbor<'_>>,
     create_if_missing: default!(bool, true),
     null_value_treatment: default!(&str, "'use_json_null'"),

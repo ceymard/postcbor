@@ -6,7 +6,7 @@ use postbor_core::datum::write_subvalue;
 use postbor_core::ops;
 use postbor_core::value::{Kind, Value};
 
-use crate::datum::{ByteaArg, Cbor, CborOut, PallocBuf, TextArg, TextOut, VarlenaOut};
+use crate::datum::{ByteaArg, Cbor, CborOut, PallocBuf, TextArg, TextArray, TextOut, VarlenaOut};
 use crate::error::{OrRaise, Source};
 use crate::io::root;
 use crate::io::{parse_datum, print_value};
@@ -81,13 +81,13 @@ fn cbor_object_field_bytes_text(doc: Cbor<'_>, key: ByteaArg<'_>) -> Option<Text
 
 #[pg_operator(immutable, strict, parallel_safe)]
 #[opname(#>)]
-fn cbor_extract_path_op(doc: Cbor<'_>, path: Array<'_, &str>) -> Option<CborOut> {
+fn cbor_extract_path_op(doc: Cbor<'_>, path: TextArray<'_>) -> Option<CborOut> {
     get_text_path(&root!(doc), path.iter()).map(|v| value_out(&v))
 }
 
 #[pg_operator(immutable, strict, parallel_safe)]
 #[opname(#>>)]
-fn cbor_extract_path_text_op(doc: Cbor<'_>, path: Array<'_, &str>) -> Option<TextOut> {
+fn cbor_extract_path_text_op(doc: Cbor<'_>, path: TextArray<'_>) -> Option<TextOut> {
     get_text_path(&root!(doc), path.iter()).and_then(|v| value_text(&v))
 }
 
@@ -151,7 +151,7 @@ fn cbor_exists(doc: Cbor<'_>, key: TextArg<'_>) -> bool {
 #[opname(?|)]
 #[restrict(matchingsel)]
 #[join(matchingjoinsel)]
-fn cbor_exists_any(doc: Cbor<'_>, keys: Array<'_, &str>) -> bool {
+fn cbor_exists_any(doc: Cbor<'_>, keys: TextArray<'_>) -> bool {
     let d = parse_datum(doc);
     let v = Value::root(&d);
     keys.iter().flatten().any(|k| ops::exists_text(&v, k).or_raise(Source::Stored))
@@ -161,7 +161,7 @@ fn cbor_exists_any(doc: Cbor<'_>, keys: Array<'_, &str>) -> bool {
 #[opname(?&)]
 #[restrict(matchingsel)]
 #[join(matchingjoinsel)]
-fn cbor_exists_all(doc: Cbor<'_>, keys: Array<'_, &str>) -> bool {
+fn cbor_exists_all(doc: Cbor<'_>, keys: TextArray<'_>) -> bool {
     let d = parse_datum(doc);
     let v = Value::root(&d);
     keys.iter().flatten().all(|k| ops::exists_text(&v, k).or_raise(Source::Stored))

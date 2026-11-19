@@ -42,3 +42,10 @@ SELECT count(*) FROM ops_t a JOIN ops_t b ON a.c = b.c;
 RESET enable_seqscan;
 SELECT count(DISTINCT c) FROM ops_t;
 DROP TABLE ops_t;
+-- text[] arguments: NULL elements are skipped, dimensions flattened; arrays read from a table (short headers,
+-- compressed) are flattened first.
+SELECT '{"a": 1}'::cbor ?| ARRAY[NULL, 'a'], '{"a": 1, "b": 2}'::cbor ?& ARRAY[['a', 'b'], [NULL, 'b']], '{"a": {"b": 1}}'::cbor #> ARRAY['a', NULL];
+CREATE TABLE ta (k text[]);
+INSERT INTO ta VALUES (ARRAY['a', 'b']), (ARRAY(SELECT 'key' || (i % 10) FROM generate_series(1, 5000) i) || ARRAY['a']);
+SELECT array_length(k, 1), pg_column_compression(k) IS NOT NULL AS compressed, '{"a": 1}'::cbor ?| k, '{"a": 1}'::cbor ?& k FROM ta ORDER BY 1;
+DROP TABLE ta;

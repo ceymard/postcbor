@@ -182,3 +182,21 @@ SELECT count(DISTINCT c) FROM ops_t;
 (1 row)
 
 DROP TABLE ops_t;
+-- text[] arguments: NULL elements are skipped, dimensions flattened; arrays read from a table (short headers,
+-- compressed) are flattened first.
+SELECT '{"a": 1}'::cbor ?| ARRAY[NULL, 'a'], '{"a": 1, "b": 2}'::cbor ?& ARRAY[['a', 'b'], [NULL, 'b']], '{"a": {"b": 1}}'::cbor #> ARRAY['a', NULL];
+ ?column? | ?column? | ?column? 
+----------+----------+----------
+ t        | t        | 
+(1 row)
+
+CREATE TABLE ta (k text[]);
+INSERT INTO ta VALUES (ARRAY['a', 'b']), (ARRAY(SELECT 'key' || (i % 10) FROM generate_series(1, 5000) i) || ARRAY['a']);
+SELECT array_length(k, 1), pg_column_compression(k) IS NOT NULL AS compressed, '{"a": 1}'::cbor ?| k, '{"a": 1}'::cbor ?& k FROM ta ORDER BY 1;
+ array_length | compressed | ?column? | ?column? 
+--------------+------------+----------+----------
+            2 | f          | t        | f
+         5001 | t          | t        | f
+(2 rows)
+
+DROP TABLE ta;

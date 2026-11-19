@@ -75,7 +75,7 @@ Notes from implementation:
 - [x] Core `gin`: walk over keys and atomic items, entries for both classes; tests that contained values have a subset of entries; fuzzed (`edit` target: contained values derived from each input).
 - [x] Support functions and operator classes; `gin` suite: every query gives the same rows through the index as by a sequential scan, and uses the index.
 - [x] Benchmark against jsonb's classes (non-assertion PG 18, 200k small documents with a nested map, 2026-11-19): same index sizes (29 MB `cbor_ops`/`jsonb_ops`, 24 MB path classes), builds 3–5% faster. Indexed `@>` within 10–20% of jsonb, except `@> {"active": true, "addr": {"zip": 5}}` with the default class: 1.9 ms vs 10.1, because `cbor_ops` keeps array elements and map values apart (jsonb's flag for `5` also matches `tags: [.., 5]`).
-- [ ] Operators taking `text[]` (`?|`, `?&`, `-`, `#>`) cost about twice jsonb per row when rows are rechecked (`?| '{zip,nope}'`: 56 ms vs 29): the array argument goes through pgrx's `Array<&str>` on every call.
+- [x] Operators taking `text[]` (`?|`, `?&`, `-`, `#>`, `#-`, `cbor_set`, …) read it as `TextArray`: one `deconstruct_array` call with text's fixed layout, instead of pgrx's `Array`, which looks the element type up in the catalog on every call. `?|` and `#>>` per row: 44 → 32 ms (jsonb 15); the rest is the walk past nested values.
 
 ## Phase 3: path queries
 

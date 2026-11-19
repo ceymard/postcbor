@@ -64,6 +64,60 @@ unsafe fn detoast<'a>(datum: pg_sys::Datum) -> (&'a [u8], *mut pg_sys::varlena) 
     }
 }
 
+/// A `text[]` argument, its elements borrowed in place (NULL elements are None; dimensions are flattened). Text's
+/// storage layout is fixed, so the array is split without the catalog lookup pgrx's `Array` makes on every call.
+pub struct TextArray<'a>(Vec<Option<&'a str>>);
+
+impl<'a> TextArray<'a> {
+    pub fn iter(&self) -> impl Iterator<Item = Option<&'a str>> + '_ {
+        self.0.iter().copied()
+    }
+}
+
+impl FromDatum for TextArray<'_> {
+    unsafe fn from_polymorphic_datum(datum: pg_sys::Datum, is_null: bool, _: pg_sys::Oid) -> Option<Self> {
+        if is_null || datum.is_null() {
+            return None;
+        }
+        let orig = datum.cast_mut_ptr::<pg_sys::varlena>();
+        // SAFETY: a non-null `text[]` datum is a varlena; ArrayType needs a plain 4-byte header (VARATT_IS_4B_U),
+        // anything else (short, compressed, external, expanded) is flattened by PostgreSQL.
+        let arr = unsafe {
+            let first = *orig.cast::<u8>();
+            let plain = if cfg!(target_endian = "little") { first & 0x03 == 0 } else { first & 0xc0 == 0 };
+            if plain { orig } else { pg_sys::pg_detoast_datum(orig) }
+        };
+        let (mut elems, mut nulls, mut n) = (ptr::null_mut(), ptr::null_mut(), 0);
+        // SAFETY: `arr` is a flat array of text; the element pointers point into it and live as long.
+        unsafe {
+            pg_sys::deconstruct_array(arr.cast(), pg_sys::TEXTOID, -1, false, pg_sys::TYPALIGN_INT as c_char, &mut elems, &mut nulls, &mut n);
+        }
+        let n = n.max(0) as usize;
+        let mut out = Vec::with_capacity(n);
+        for i in 0..n {
+            // SAFETY: deconstruct_array returned `n` elements and `n` null flags.
+            let (d, null) = unsafe { (*elems.add(i), *nulls.add(i)) };
+            out.push(if null {
+                None
+            } else {
+                // SAFETY: a non-null element is a text varlena inside the array.
+                let (b, _) = unsafe { detoast(d) };
+                // Text in a UTF-8 database is valid UTF-8 (ADR-0010).
+                Some(core::str::from_utf8(b).unwrap_or_else(|_| crate::error::fail(PgSqlErrorCode::ERRCODE_CHARACTER_NOT_IN_REPERTOIRE, "invalid UTF-8 in text array")))
+            });
+        }
+        Some(TextArray(out))
+    }
+}
+
+unsafe impl<'fcx> ArgAbi<'fcx> for TextArray<'fcx> {
+    unsafe fn unbox_arg_unchecked(arg: Arg<'_, 'fcx>) -> Self {
+        let index = arg.index();
+        // SAFETY: pgrx calls this only for arguments declared as `text[]`.
+        unsafe { arg.unbox_arg_using_from_datum().unwrap_or_else(|| panic!("argument {index} must not be null")) }
+    }
+}
+
 /// A `text` or `bytea` argument borrowed as bytes. Text is UTF-8 (ADR-0010), so it is not re-checked.
 macro_rules! bytes_arg {
     ($arg:ident, $sql:literal) => {
@@ -150,6 +204,7 @@ pub struct ByteaOut(pub VarlenaOut);
 sql_type!(TextOut, "text", TypeOrigin::External);
 bytes_arg!(TextArg, "text");
 bytes_arg!(ByteaArg, "bytea");
+sql_type!(TextArray<'_>, "text[]", TypeOrigin::External);
 sql_type!(ByteaOut, "bytea", TypeOrigin::External);
 
 impl IntoDatum for TextOut {

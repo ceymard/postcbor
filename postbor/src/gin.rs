@@ -136,7 +136,7 @@ fn cbor_gin_extract_query(fcinfo: pg_sys::FunctionCallInfo) -> InternalOut {
         }
         s @ (EXISTS_ANY | EXISTS_ALL) => {
             // SAFETY: for `?|` and `?&` the query is a non-null text[] datum.
-            let keys = unsafe { Array::<&str>::from_datum(arg(fcinfo, 0), false) };
+            let keys = unsafe { crate::datum::TextArray::from_datum(arg(fcinfo, 0), false) };
             for k in keys.iter().flat_map(|a| a.iter()).flatten() {
                 key(&mut out, &ops::key_text(k).to_vec());
             }
