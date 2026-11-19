@@ -2,9 +2,11 @@
 
 Usage: python3 tests/jsonpath/extract_cases.py <postgres source dir> > postbor/tests/pg_regress/sql/jsonpath_diff.sql
 
-Each statement using jsonb_path_*, @? or @@ is kept with a cbor copy (jsonb_path_ -> cbor_path_, jsonb literals ->
-cbor). The suite runs both, compares the rows as jsonb (an error on both sides counts as equal), and prints only the
-statements whose results differ. Statements using features the running PostgreSQL lacks fail on both sides.
+Each statement using jsonb_path_*, @? or @@ becomes two: a cbor copy (jsonb_path_ -> cbor_path_, jsonb literals ->
+cbor), and a jsonb reference that reads each document and vars literal as cbor and casts it to jsonb, so that both sides
+see the same values (EDN reads 1.50 as a float). The suite runs both, compares the rows as jsonb (errors by SQLSTATE),
+prints the statements whose results differ, and counts the rest. Statements using features the running PostgreSQL lacks
+fail on both sides.
 """
 import re
 import sys
@@ -44,11 +46,62 @@ def statements(text):
 
 
 def to_cbor(stmt):
-    s = stmt.replace("jsonb_path_", "cbor_path_")
+    s = stmt.replace("jsonb_path_", "cbor_path_").replace("jsonb_build_object(", "cbor_build_object(")
     s = re.sub(r"\bjsonb\s+'", "cbor '", s)
     s = re.sub(r"::jsonb\b", "::cbor", s)
     s = re.sub(r"\bjsonb\b(?=\s*[,)])", "cbor", s)  # column type lists such as x(js jsonb)
     return s
+
+
+LIT = r"'(?:[^']|'')*'"
+
+
+def call_args(s, open_at):
+    """Top-level argument spans of the call whose '(' is at open_at, and the index of its ')'."""
+    spans, depth, i, start = [], 0, open_at, open_at + 1
+    while i < len(s):
+        ch = s[i]
+        if ch == "'":
+            i = s.index("'", i + 1)
+            while s.startswith("''", i):
+                i = s.index("'", i + 2)
+        elif ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                spans.append((start, i))
+                return spans, i
+        elif ch == "," and depth == 1:
+            spans.append((start, i))
+            start = i + 1
+        i += 1
+    raise ValueError(s)
+
+
+def to_reference(stmt):
+    """The jsonb statement with its document and vars literals read as cbor and cast to jsonb."""
+    s = re.sub(r"\bjsonb\s+(" + LIT + ")", r"(\1::cbor)::jsonb", stmt)
+    s = re.sub("(" + LIT + r")::jsonb\b", r"\1::cbor::jsonb", s)
+    out, pos = [], 0
+    for m in re.finditer(r"\bjsonb_path_\w+\s*\(", s):
+        if m.start() < pos:
+            continue
+        spans, close = call_args(s, m.end() - 1)
+        out.append(s[pos : m.end()])
+        prev = m.end()
+        for k, (a, b) in enumerate(spans):
+            arg = s[a:b]
+            body = re.sub(r"^\s*vars\s*=>\s*", "", arg)
+            named = body != arg
+            if (k in (0, 2) or named) and re.fullmatch(r"\s*" + LIT + r"\s*", body):
+                arg = arg[: len(arg) - len(body)] + "(" + body.strip() + "::cbor)::jsonb"
+            out.append(s[prev:a] + arg)
+            prev = b
+        out.append(s[prev : close + 1])
+        pos = close + 1
+    out.append(s[pos:])
+    return "".join(out)
 
 
 src = sys.argv[1]
@@ -59,7 +112,7 @@ for st in statements(text):
     if low.startswith("set ") or low.startswith("reset "):
         cases.append(("set", st, st))
     elif low.startswith("select") and ("jsonb_path_" in st or "@?" in st or "@@" in st):
-        cases.append(("query", st, to_cbor(st)))
+        cases.append(("query", to_reference(st), to_cbor(st)))
 
 
 def q(s):
@@ -71,29 +124,34 @@ print("-- Only statements whose cbor results differ from jsonb's print.")
 print("CREATE TEMP TABLE path_cases (n int, kind text, j text, c text);")
 print("INSERT INTO path_cases VALUES")
 print(",\n".join(f"({i}, '{k}', {q(j)}, {q(c)})" for i, (k, j, c) in enumerate(cases)) + ";")
-print(r"""CREATE FUNCTION path_rows(sql text) RETURNS text LANGUAGE plpgsql AS $f$
+print(r"""CREATE FUNCTION pg_temp.path_rows(sql text) RETURNS text LANGUAGE plpgsql AS $f$
 DECLARE r text;
 BEGIN
     EXECUTE 'SELECT coalesce(string_agg(to_jsonb(t)::text, '' | ''), ''(none)'') FROM (' || sql || ') t' INTO r;
     RETURN r;
 EXCEPTION WHEN others THEN
-    RETURN 'ERROR';
+    RETURN 'ERROR ' || SQLSTATE;
 END $f$;
 DO $$
-DECLARE r record; jr text; cr text; bad int := 0;
+DECLARE r record; jr text; cr text; bad int := 0; same int := 0; errors int := 0;
 BEGIN
     FOR r IN SELECT * FROM path_cases ORDER BY n LOOP
         IF r.kind = 'set' THEN
             EXECUTE r.j;
             CONTINUE;
         END IF;
-        jr := path_rows(r.j);
-        cr := path_rows(r.c);
+        jr := pg_temp.path_rows(r.j);
+        -- Default column names follow the function names, which differ.
+        cr := replace(pg_temp.path_rows(r.c), '"cbor_path_', '"jsonb_path_');
         IF jr IS DISTINCT FROM cr THEN
             bad := bad + 1;
             RAISE WARNING E'%\n  jsonb: %\n  cbor:  %', r.c, jr, cr;
+        ELSIF jr LIKE 'ERROR %' THEN
+            errors := errors + 1;
+        ELSE
+            same := same + 1;
         END IF;
     END LOOP;
-    RAISE NOTICE 'differences: %', bad;
+    RAISE WARNING 'same rows: %, same error: %, differences: %', same, errors, bad;
 END $$;
 RESET ALL;""")

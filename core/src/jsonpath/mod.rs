@@ -2,10 +2,11 @@
 //! The layout follows PostgreSQL's `jspInitByBuffer`: each item is a type byte, padding to 4, the offset of the next
 //! item, then type-specific fields; child offsets are relative to the item's start and 0 means "absent".
 
+pub mod eval;
 pub mod print;
 
 use crate::cursor::Cursor;
-use crate::decimal::Dec;
+use crate::decimal::{Dec, Num};
 use crate::error::{Error, ErrorKind, NO_OFFSET, Result};
 
 const _: () = assert!(MAX_NESTING == 256, "update the nesting error message");
@@ -79,7 +80,7 @@ pub enum DatetimeMethod {
 pub enum Kind<'a> {
     Null,
     String(&'a [u8]),
-    Numeric(Dec),
+    Numeric(Num),
     Bool(bool),
     Binary(BinOp, ItemId, ItemId),
     Unary(UnOp, ItemId),
@@ -185,7 +186,7 @@ impl<'a> Path<'a> {
             let kind = match typ {
                 0 => Kind::Null,
                 1 => Kind::String(string(&mut c)?),
-                2 => Kind::Numeric(Dec::from_numeric(c.buf().get(c.pos()..).ok_or_else(malformed)?)?),
+                2 => Kind::Numeric(Num::from_dec(Dec::from_numeric(c.buf().get(c.pos()..).ok_or_else(malformed)?)?)),
                 3 => Kind::Bool(c.byte().map_err(|_| malformed())? != 0),
                 4 => bin(B::And, &mut c, &mut child)?,
                 5 => bin(B::Or, &mut c, &mut child)?,
