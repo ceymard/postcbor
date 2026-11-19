@@ -232,7 +232,7 @@ The property tests in section 10 check antisymmetry, transitivity, and agreement
 | `-` | `text`, `text[]`, `int`, `bytea` | `cbor` | Delete a key, or delete an element (`int`: by index) |
 | `#-` | `text[]` | `cbor` | Delete at path |
 | `= <> < <= > >=` | `cbor` | `bool` | Section 7 |
-| `@?`, `@@` | `jsonpath` | `bool` | Phase 3 |
+| `@?`, `@@` | `jsonpath` | `bool` | Path exists / path predicate holds (see Path queries) |
 
 Out-of-range indexes and missing keys return NULL, as in jsonb.
 
@@ -274,6 +274,20 @@ Queries:
 - `?`, `?|`, `?&`: the key-role entry of each text key. `?&` with no keys matches every row; `?|` with none matches no row.
 - `?#`, `?#|`, `?#&`: the key-role entry of each key. A key that is not atomic cannot be found among array elements through entries, so `?#` with such a key, or `?#|` with any such key, rechecks every row; `?#&` skips such keys.
 - Strategy numbers: 7 `@>`, 9 `?`, 10 `?|`, 11 `?&` (jsonb's), 12 `?#`, 13 `?#|`, 14 `?#&`.
+
+### Path queries (phase 3)
+
+`@?`, `@@` and `cbor_path_exists`, `cbor_path_match`, `cbor_path_query` (set-returning), `cbor_path_query_array`, `cbor_path_query_first`, each with `vars cbor` (a map) and `silent bool`, plus the `_tz` variants. The path argument is PostgreSQL's `jsonpath` ([ADR-0008](../adr/0008-path-queries-reuse-jsonpath.md)). Results must equal jsonb's for every value that converts to jsonb without loss: the reference is `jsonb_path_*(value::jsonb, …)`.
+
+- **Compiled path**: the `jsonpath` value's binary form is decoded in the core (format version 1, stable since PG 12; PG 17 appended the `.bigint()` … `.timestamp_tz()` items). Unknown versions and items are refused. The decoded path is cached per call site.
+- **Numbers**: inside path expressions, numbers compare by value, as in SQL/JSON: `1 == 1.0`, and bignums, decimal fractions and bigfloats are numbers. A float takes the value of its shortest decimal form, as when it is converted to jsonb. Containment and `=` stay typed.
+- **CBOR types jsonpath lacks**:
+  - Byte strings: `.type()` is `"bytes"`; comparing them with other types is unknown, as jsonpath does for mismatched types.
+  - Tags 2–5 are numbers; tags 0 and 1 are datetimes; other tags are transparent (the path sees their content).
+  - Map keys that are not text: `.key` matches only text keys; `.*` and `.keyvalue()` visit every entry, and `.keyvalue()` gives the key as its CBOR value.
+  - `undefined` and simple values keep their own types (`.type()` is `"undefined"`, `"simple"`), unequal to `null`.
+- **Regex and datetimes**: `like_regex` runs PostgreSQL's regex engine; the datetime methods use PostgreSQL's datetime parsing.
+- **GIN**: `@?` and `@@` use `cbor_ops` and `cbor_path_ops` for paths made of key accessors and equality with constants, as jsonb's classes do.
 
 ### Subscripting
 
@@ -425,4 +439,7 @@ Approved: `pgrx` (and its dependency tree); for fuzzing only, `libfuzzer-sys` an
 
 ## 12. Open decisions
 
-None. Add new ones here, and ask the user before implementing what depends on them.
+Ask the user before implementing what depends on them.
+
+1. **Recursion in the path evaluator.** The core never recurses (§9). A jsonpath evaluator is naturally recursive over the path expression (filters, arithmetic and comparisons contain sub-paths). Options: an explicit-stack interpreter, or recursion over the path expression only, with the nesting capped by a fixed constant when the path is decoded, while descent into the document (`.**`, lax unwrapping) stays on explicit stacks.
+2. **Type of arithmetic results.** SQL/JSON arithmetic is decimal. A result such as `$.a + 1` or `$.a * 2.5` must become a CBOR item: an integer when it is whole, else a decimal fraction (tag 4), or a float when an operand was a float.

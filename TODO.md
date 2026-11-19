@@ -79,5 +79,9 @@ Notes from implementation:
 
 ## Phase 3: path queries
 
-- [ ] Run core `jsonpath` over `cbor` (ADR-0008): `@?`, `@@`, `cbor_path_exists/match/query/query_array/query_first`, plus the `_tz` variants.
-- [ ] GIN support for `@?` / `@@`, if phase 2's design allows it.
+Decided 2026-11-19 (design §8 Path queries, ADR-0008). Open: design §12 (recursion in the evaluator, type of arithmetic results).
+
+- [ ] Decode the compiled `jsonpath` (core, iterative, version check, nesting cap) and PostgreSQL `numeric` literals.
+- [ ] Differential harness: PostgreSQL's `jsonb_jsonpath.sql` cases run against `cbor` and `jsonb`, printing mismatches only.
+- [ ] Evaluator, in slices: accessors with lax/strict (`@?`, `cbor_path_exists`, `cbor_path_query`); predicates and filters; arithmetic and item methods; `like_regex`, `vars`, `.keyvalue()`; `_tz` and datetime methods.
+- [ ] GIN support for `@?` / `@@`.
