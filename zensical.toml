@@ -26,6 +26,10 @@ nav = [
   ] },
 ]
 
+# Version selector: reads versions.json, written by mike (`make docs-deploy`).
+[project.extra.version]
+provider = "mike"
+
 [project.theme]
 language = "en"
 features = [

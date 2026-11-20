@@ -12,8 +12,10 @@ NIGHTLY ?= nightly
 PGRX_INSTALL_FLAGS ?=
 # Documentation site generator, run through uvx.
 ZENSICAL ?= uvx zensical==0.1.2
+# Versioned docs: Zensical's fork of mike (not on PyPI), pinned to a commit.
+MIKE ?= uvx --with zensical==0.1.2 --from git+https://github.com/squidfunk/mike.git@2d4ad799442f4592db8ad53b179bfb33db8c69ac mike
 
-.PHONY: all install test test-core test-matrix miri fuzz clippy crosscheck cborx-check docs docs-serve
+.PHONY: all install test test-core test-matrix miri fuzz clippy crosscheck cborx-check docs docs-serve docs-deploy
 
 # pgrx needs the PostgreSQL installation registered once. Building and installing use a project-local pgrx home,
 # so a developer's ~/.pgrx (used by the test targets) is never modified.
@@ -66,3 +68,10 @@ docs:
 
 docs-serve:
 	$(ZENSICAL) serve
+
+# Commits the site as DOCS_VERSION (e.g. 0.1, or dev) to the gh-pages branch, with DOCS_ALIAS (e.g. latest) if set.
+# CI runs it; MIKE_FLAGS=--push publishes.
+docs-deploy:
+	test -n "$(DOCS_VERSION)"
+	$(MIKE) deploy $(MIKE_FLAGS) --update-aliases $(DOCS_VERSION) $(DOCS_ALIAS)
+	$(if $(DOCS_ALIAS),$(MIKE) set-default $(MIKE_FLAGS) $(DOCS_ALIAS))

@@ -33,3 +33,5 @@ make docs-serve   # serve with live reload
 ```
 
 Both run a pinned version of [Zensical](https://zensical.org) through `uvx`, so only [uv](https://docs.astral.sh/uv/) needs to be installed. The build is strict: a broken link fails it.
+
+The published site is versioned: each release `vX.Y.Z` has its docs under `X.Y/`, `latest/` points at the newest release (the default), and `dev/` follows `main`. CI publishes them (`.github/workflows/docs.yml`) with `make docs-deploy`, which runs Zensical's fork of [mike](https://github.com/squidfunk/mike) and commits each version to the `gh-pages` branch. A patch release replaces its `X.Y` docs.

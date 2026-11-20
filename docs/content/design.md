@@ -439,4 +439,4 @@ Core rules:
 
 ## 11. Dependencies
 
-Approved: `pgrx` (and its dependency tree); for fuzzing only, `libfuzzer-sys` and `arbitrary`; for cross-checks only, Python `cbor2`; for the documentation site only, Python `zensical` (pinned in the `Makefile`, run through `uvx`). Any other dependency needs the user's approval first.
+Approved: `pgrx` (and its dependency tree); for fuzzing only, `libfuzzer-sys` and `arbitrary`; for cross-checks only, Python `cbor2`; for the documentation site only, Python `zensical` and Zensical's fork of `mike` for versions (installed from git, not PyPI; both pinned in the `Makefile`, run through `uvx`). Any other dependency needs the user's approval first.
