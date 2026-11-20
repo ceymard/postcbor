@@ -1,0 +1,2345 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A cbor type for PostgreSQL: the CBOR counterpart of jsonb">
+      
+      
+      
+      
+      
+        <link rel="prev" href="../performance/">
+      
+      
+        <link rel="next" href="../contributing/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="zensical-0.1.2">
+    
+    
+      
+        <title>Specification - postcbor</title>
+      
+    
+    
+      
+        
+      
+      <link rel="stylesheet" href="../assets/stylesheets/modern/main.ebb7f775.min.css">
+      
+        
+          
+        
+        <link rel="stylesheet" href="../assets/stylesheets/modern/palette.b60ce83d.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,500,500i,700,700i%7CJetBrains+Mono:400,400i,700,700i&amp;display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_scope.pathname.endsWith("/")||(__md_scope=new URL(__md_scope.pathname+"/",location)),__md_hash=e=>[...e].reduce(((e,t)=>(e<<5)-e+t.charCodeAt(0)),0),__md_get=(e,t=localStorage,_=__md_scope)=>JSON.parse(t.getItem(_.pathname+"."+e)),__md_set=(e,t,_=localStorage,a=__md_scope)=>{try{_.setItem(a.pathname+"."+e,JSON.stringify(t))}catch(e){}},document.documentElement.setAttribute("data-platform",navigator.platform)</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer" aria-hidden="true"></label>
+    <div data-md-component="skip">
+      <a href="#__skip" class="md-skip">
+        Skip to content
+      </a>
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="./.." title="postcbor" class="md-header__button md-logo" aria-label="postcbor" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-book-open" viewBox="0 0 24 24"><path d="M12 5v16M20.001 19A2 2 0 0 0 22 17V5a2 2 0 0 0-1.999-2L16 3.002A5 5 0 0 0 12 5a5 5 0 0 0-4-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 1.999 2H8a5 5 0 0 1 4 2 5 5 0 0 1 4-2z"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-menu" viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h16"/></svg>
+      <span class="md-visually-hidden">Navigation</span>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            postcbor
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Specification
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-sun-moon" viewBox="0 0 24 24"><path d="M12 2v2M14.837 16.385a6 6 0 1 1-7.223-7.222c.624-.147.97.66.715 1.248a4 4 0 0 0 5.26 5.259c.589-.255 1.396.09 1.248.715M16 12a4 4 0 0 0-4-4M19 5l-1.256 1.256M20 12h2"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-moon" viewBox="0 0 24 24"><path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg>
+          <span class="md-visually-hidden">Search</span>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog" aria-label="Search">
+  <button type="button" class="md-search__button">
+    Search
+  </button>
+</div>
+      
+    
+    <div class="md-header__source">
+      
+    </div>
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="./.." title="postcbor" class="md-nav__button md-logo" aria-label="postcbor" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-book-open" viewBox="0 0 24 24"><path d="M12 5v16M20.001 19A2 2 0 0 0 22 17V5a2 2 0 0 0-1.999-2L16 3.002A5 5 0 0 0 12 5a5 5 0 0 0-4-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 1.999 2H8a5 5 0 0 1 4 2 5 5 0 0 1 4-2z"/></svg>
+
+    </a>
+    postcbor
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="./.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Overview
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Install
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../coming-from-jsonb/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Coming from jsonb
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Guide
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_4">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Guide
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../text-form/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Text form
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../binary-form/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Binary form
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../operators/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Operators
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../functions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Functions
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../path-queries/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Path queries
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../casts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Casts and JSON
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../indexes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Indexes
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../settings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Settings and limits
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../performance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Performance
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Internals
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+            <label class="md-nav__title" for="__nav_5">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Internals
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Specification
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="././" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Specification
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-goals-and-scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        1. Goals and scope
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-threat-model-and-limits" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        2. Threat model and limits
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-data-model-and-normalization" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        3. Data model and normalization
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-datum-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        4. Datum format
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-text-format-edn" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        5. Text format (EDN)
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. Text format (EDN)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#input-cbor_in-textcbor" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Input (<code>cbor_in</code>, <code>text::cbor</code>)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#output-cbor_out-on-anything-other-than-a-text-string" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Output (<code>cbor_out</code>, <code>-&gt;&gt;</code> on anything other than a text string)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-packed-input" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        6. Packed input
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-comparison-equality-hashing" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        7. Comparison, equality, hashing
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-sql-surface" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        8. SQL surface
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="8. SQL surface">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#type-and-io" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Type and I/O
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#operators" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Operators
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#gin-indexes" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        GIN indexes
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#path-queries" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Path queries
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#subscripting" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Subscripting
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#functions-with-a-jsonb-counterpart" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Functions with a jsonb counterpart
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cbor-specific-functions" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        CBOR-specific functions
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#casts-all-explicit" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Casts (all explicit)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#to_cbor-mapping" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        to_cbor mapping
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-code-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        9. Code architecture
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-testing" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        10. Testing
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-dependencies" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        11. Dependencies
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Contributing
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-built/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  How this was built
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  
+                    
+                    
+                    
+                      
+                    
+                    
+                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+                      <div class="md-sidebar-button__wrapper">
+                        <label class="md-sidebar-button" for="__toc"></label>
+                      </div>
+                    
+                  
+                  <div class="md-sidebar__inner">
+                    
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-goals-and-scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        1. Goals and scope
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-threat-model-and-limits" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        2. Threat model and limits
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-data-model-and-normalization" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        3. Data model and normalization
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-datum-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        4. Datum format
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-text-format-edn" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        5. Text format (EDN)
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. Text format (EDN)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#input-cbor_in-textcbor" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Input (<code>cbor_in</code>, <code>text::cbor</code>)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#output-cbor_out-on-anything-other-than-a-text-string" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Output (<code>cbor_out</code>, <code>-&gt;&gt;</code> on anything other than a text string)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-packed-input" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        6. Packed input
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-comparison-equality-hashing" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        7. Comparison, equality, hashing
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-sql-surface" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        8. SQL surface
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="8. SQL surface">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#type-and-io" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Type and I/O
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#operators" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Operators
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#gin-indexes" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        GIN indexes
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#path-queries" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Path queries
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#subscripting" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Subscripting
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#functions-with-a-jsonb-counterpart" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Functions with a jsonb counterpart
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cbor-specific-functions" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        CBOR-specific functions
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#casts-all-explicit" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Casts (all explicit)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#to_cbor-mapping" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        to_cbor mapping
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-code-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        9. Code architecture
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-testing" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        10. Testing
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-dependencies" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        11. Dependencies
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+                
+
+
+
+  
+
+
+  <nav class="md-path" aria-label="Navigation" >
+    <ol class="md-path__list">
+      
+        
+  
+  
+    <li class="md-path__item">
+      <a href="./.." class="md-path__link">
+        
+  
+  <span class="md-ellipsis">
+    Overview
+  </span>
+
+      </a>
+    </li>
+  
+
+      
+      
+        
+  
+  
+    
+    
+    
+    
+    
+      <li class="md-path__item">
+        <a href="././" class="md-path__link">
+          
+  
+  <span class="md-ellipsis">
+    Internals
+  </span>
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ol>
+  </nav>
+
+              
+              <article class="md-content__inner md-typeset">
+                <a id="__skip" tabindex="-1"></a>
+                
+                  
+
+
+<h1 id="postcbor-design">postcbor design<a class="headerlink" href="#postcbor-design" title="Permanent link">&para;</a></h1>
+<p>This is the reference specification: how postcbor behaves, exactly. The user pages describe the same behaviour less formally. In the repository, <code>CONTEXT.md</code> defines the terms used here, <code>docs/adr/</code> records the reasons behind decisions (cited as ADR-NNNN), and <code>TODO.md</code> tracks the implementation plan.</p>
+<h2 id="1-goals-and-scope">1. Goals and scope<a class="headerlink" href="#1-goals-and-scope" title="Permanent link">&para;</a></h2>
+<ul>
+<li>A <code>cbor</code> type that does for CBOR what <code>jsonb</code> does for JSON: the same operators, the same functions (named <code>cbor_*</code> instead of <code>jsonb_*</code>), and the same index support, extended to the full CBOR data model.</li>
+<li>Extension name <code>postcbor</code>, type name <code>cbor</code>. Operator symbols are the same as jsonb's, plus <code>?#</code>, <code>?#|</code> and <code>?#&amp;</code> for keys of any type.</li>
+<li>PostgreSQL 15–18.</li>
+<li>Install with <code>make &amp;&amp; make install</code> (a wrapper around <code>cargo pgrx install</code>). Pre-built packages are out of scope for now.</li>
+</ul>
+<h2 id="2-threat-model-and-limits">2. Threat model and limits<a class="headerlink" href="#2-threat-model-and-limits" title="Permanent link">&para;</a></h2>
+<p>Input is untrusted. Bytes arrive from web applications over the internet through <code>::cbor</code>, <code>cbor_recv</code> (binary protocol) and the <code>bytea</code> casts. Every input path goes through the same validation and normalization.</p>
+<p>The stored datum is trusted after input, as with jsonb. Debug builds (<code>debug_assertions</code>) re-validate every datum they read, to catch format bugs.</p>
+<table>
+<thead>
+<tr>
+<th>Setting</th>
+<th>Default</th>
+<th>Context</th>
+<th>Applies to</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>postcbor.max_depth</code></td>
+<td>512</td>
+<td><code>SUSET</code></td>
+<td>Nesting depth on every input path and in builders. Each array, map and tag counts as one level.</td>
+</tr>
+<tr>
+<td><code>postcbor.max_expansion_ratio</code></td>
+<td>16</td>
+<td><code>SUSET</code></td>
+<td>Body size after normalization divided by input size. Matters for packed input.</td>
+</tr>
+<tr>
+<td><code>postcbor.max_expanded_size</code></td>
+<td>256MB (unit kB)</td>
+<td><code>SUSET</code></td>
+<td>Absolute body size after normalization.</td>
+</tr>
+</tbody>
+</table>
+<p>The index section is not counted in the expansion limits. Results of edits (<code>||</code>, <code>cbor_set</code>, subscript assignment, …) are held to <code>postcbor.max_depth</code> too: <code>||</code> can wrap a value in an array, and a stored value deeper than input accepts could not be dumped and restored (found by fuzzing). Values are also limited to PostgreSQL's 1 GB varlena maximum.</p>
+<p>Errors raised, by SQLSTATE:</p>
+<table>
+<thead>
+<tr>
+<th>Condition</th>
+<th>SQLSTATE</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Malformed CBOR, invalid EDN, invalid UTF-8, duplicate keys, invalid bignum</td>
+<td><code>22P02</code> invalid_text_representation (<code>22P03</code> invalid_binary_representation for <code>cbor_recv</code>)</td>
+</tr>
+<tr>
+<td>Depth or expansion limit exceeded</td>
+<td><code>54000</code> program_limit_exceeded</td>
+</tr>
+<tr>
+<td>Cast out of range</td>
+<td><code>22003</code> numeric_value_out_of_range</td>
+</tr>
+<tr>
+<td>Cast from the wrong CBOR type</td>
+<td><code>22023</code> invalid_parameter_value</td>
+</tr>
+<tr>
+<td>Allocation failure on an input-sized buffer</td>
+<td><code>53200</code> out_of_memory</td>
+</tr>
+</tbody>
+</table>
+<h2 id="3-data-model-and-normalization">3. Data model and normalization<a class="headerlink" href="#3-data-model-and-normalization" title="Permanent link">&para;</a></h2>
+<p>Every accepted input is normalized into the deterministic encoding. Normalization rules, in addition to well-formedness:</p>
+<ol>
+<li><strong>Shortest heads</strong>: integers, lengths, tag numbers and simple values use the shortest head encoding.</li>
+<li><strong>Definite lengths only</strong>: indefinite-length arrays and maps become definite. Indefinite-length strings are joined into one definite string. Every chunk must be a definite string of the same major type.</li>
+<li><strong>Floats</strong>: stored in the shortest of f16/f32/f64 that represents the value exactly, including subnormals. Any NaN (any sign, any payload) becomes <code>f97e00</code>. Infinity is <code>f97c00</code>, -Infinity is <code>f9fc00</code>, and -0.0 is <code>f98000</code> (kept distinct from 0.0).</li>
+<li><strong>Map keys</strong>: sorted by bytewise lexicographic order of their deterministic encodings (RFC 8949 core deterministic ordering). After key normalization, duplicate keys are an error. Example: <code>{1: 0, 2(h'01'): 0}</code> is rejected.</li>
+<li><strong>Bignums (tags 2/3)</strong>: the content must be a byte string. Leading zero bytes are stripped. A value that fits in 64 bits becomes a major type 0 or 1 integer. Tag 2: n ≤ 2⁶⁴−1. Tag 3: −1−n with n ≤ 2⁶⁴−1.</li>
+<li><strong>Text strings</strong> must be valid UTF-8.</li>
+<li><strong>Simple values</strong> 24–31, and the two-byte form <code>f8</code> with a value below 32, are rejected (not well-formed). Every other simple value is kept.</li>
+<li><strong>Other tags</strong> are kept as they are, with their content normalized like any other value. The packing tags listed in section 6 are not "other tags": rule 11 consumes them first. Interpreted tags other than 2/3 are not checked on input. Their content is validated when an operation interprets them, for example a cast to <code>timestamptz</code>.</li>
+<li><strong>Byte strings</strong>, including tag 24 (embedded CBOR) and <code>&lt;&lt;…&gt;&gt;</code> output, are opaque. Their content is not normalized.</li>
+<li><strong>Single item only</strong>: trailing bytes after the item are an error (CBOR sequences are not accepted). So are reserved additional-info values 28–30 and a break code outside an indefinite-length item.</li>
+<li><strong>Packed input</strong> is unpacked (section 6).</li>
+</ol>
+<p>Interpreted tags:</p>
+<table>
+<thead>
+<tr>
+<th>Tag</th>
+<th>Meaning</th>
+<th>Used by</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td>RFC 3339 date-time text</td>
+<td>cast to <code>timestamptz</code></td>
+</tr>
+<tr>
+<td>1</td>
+<td>epoch date-time (number)</td>
+<td>cast to <code>timestamptz</code>, <code>to_cbor(timestamptz)</code></td>
+</tr>
+<tr>
+<td>2, 3</td>
+<td>bignum</td>
+<td>normalization, comparison, <code>numeric</code> casts</td>
+</tr>
+<tr>
+<td>4</td>
+<td>decimal fraction</td>
+<td><code>numeric</code> casts</td>
+</tr>
+<tr>
+<td>5</td>
+<td>bigfloat</td>
+<td><code>numeric</code> casts (exact: m × 2⁻ⁿ has n decimal places, up to <code>numeric</code>'s 16383)</td>
+</tr>
+<tr>
+<td>37</td>
+<td>UUID (16-byte string)</td>
+<td><code>uuid</code> casts</td>
+</tr>
+<tr>
+<td>52, 54</td>
+<td>IPv4 / IPv6 address or prefix</td>
+<td>EDN <code>IP''</code> literal</td>
+</tr>
+<tr>
+<td>100</td>
+<td>days since epoch (RFC 8943)</td>
+<td><code>date</code> casts, <code>to_cbor(date)</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="4-datum-format">4. Datum format<a class="headerlink" href="#4-datum-format" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>datum  = header body [index body_len]
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>header = 1 byte:
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>         bits 0-1  format version (0 = this format)
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>         bit  2    has_index
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>         bits 3-7  reserved, 0
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>body   = deterministic encoding of the value
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>index  = dir_count:u32
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>         dir_count × { container_offset:u32, table:u32 }
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>         tables: sampled entry offsets, u16 or u32 each, in directory order
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>body_len = u32 little-endian, the last 4 bytes of the datum, present only when has_index
+</code></pre></div>
+<ul>
+<li><code>body_len</code> sits at the end, not after the header, so the body can be written straight into the output buffer before it is known whether an index section will follow. The header byte is written last, in place.</li>
+<li>All integers in the index section are little-endian. They are read through the cursor (<code>from_le_bytes</code> on slices), so nothing needs alignment.</li>
+<li><strong>Indexed container</strong>: an array or map with at least <code>INDEX_THRESHOLD</code> (16) entries. Smaller containers are scanned directly.</li>
+<li><strong>Container directory</strong>: one entry per indexed container, sorted by <code>container_offset</code> (offset of the container's head from the start of the body), which is depth-first body order. <code>table</code> is the byte position of its entry table in the tables area; its top bit set means the table holds 2-byte offsets.</li>
+<li><strong>Entry table</strong>: the offset of every <code>STRIDE</code>-th (8th) entry: entries 0, 8, 16, …, so ⌈n / 8⌉ offsets for n entries. Each offset is relative to the container's start and points at an array element, or at a map key (its value follows the key). A table uses 2-byte offsets when all of them fit, 4-byte otherwise. Sampling and narrow offsets cut the index from 4 bytes to about 0.25 byte per entry, which lets large values compress (see the benchmark in <code>TODO.md</code>).</li>
+<li><strong>Lookups</strong>:</li>
+<li>Array element i: read sample ⌊i / 8⌋, then step over i mod 8 elements.</li>
+<li>Map key: binary search over the sampled keys (comparing the lookup key's deterministic encoding bytewise) for the last sample ≤ the key, then scan at most 8 entries from it.</li>
+<li>Skipping a whole indexed container: jump to its last sample, then step over the rest.</li>
+<li>To descend into a nested container: binary search the directory for its offset.</li>
+<li><strong>Extracting a sub-value</strong> at body range <code>[s, e)</code>:</li>
+<li>The directory entries with <code>s ≤ container_offset &lt; e</code> form a contiguous run <code>[a, b)</code>, and their tables are contiguous too.</li>
+<li>The new datum is: a header, the body slice, then (if <code>b &gt; a</code>) the directory run with <code>container_offset − s</code> and table positions moved down by the run's first table position (width flags kept), the table bytes, and <code>body_len</code>.</li>
+<li>No entry table is rebuilt.</li>
+<li><strong>Building</strong>: the index is built in one walk over the finished body (also used for values built by edits). The same walk enforces <code>postcbor.max_depth</code>.</li>
+<li><strong>Detoasting</strong>: datums are read with <code>pg_detoast_datum_packed</code> (a 1-byte varlena header is fine, since we only read bytes).</li>
+<li><strong>Format version</strong>: any version other than 0 is rejected with an error asking the user to upgrade the extension.</li>
+</ul>
+<h2 id="5-text-format-edn">5. Text format (EDN)<a class="headerlink" href="#5-text-format-edn" title="Permanent link">&para;</a></h2>
+<h3 id="input-cbor_in-textcbor">Input (<code>cbor_in</code>, <code>text::cbor</code>)<a class="headerlink" href="#input-cbor_in-textcbor" title="Permanent link">&para;</a></h3>
+<p>Accepted:
+- <strong>Whitespace and comments</strong>: <code># …</code> to end of line, <code>/ … /</code>.
+- <strong>Integers</strong>: decimal with optional sign, <code>0x</code>/<code>0o</code>/<code>0b</code> prefixes. Any magnitude: values beyond 64 bits become bignums (tags 2/3).
+- <strong>Floats</strong>: decimal with <code>.</code> and/or an exponent; <code>NaN</code>, <code>Infinity</code>, <code>-Infinity</code>.
+- <strong>Encoding indicators</strong>: <code>_0</code>–<code>_3</code> and <code>_i</code> after a number or a container or string opener, and <code>_</code> for indefinite length (<code>[_ …]</code>, <code>{_ …}</code>, <code>(_ "a", "b")</code>). They are parsed and ignored, since the value is normalized anyway.
+- <strong>Text</strong>: <code>"text"</code> with JSON escapes, including <code>\u</code> surrogate pairs.
+- <strong>Byte strings</strong>:
+  - <code>'text'</code>: the UTF-8 bytes of the text.
+  - <code>h'…'</code>: hex, with whitespace and comments allowed inside.
+  - <code>b64'…'</code>: standard or URL-safe alphabet, padding optional.
+  - <code>&lt;&lt;item, …&gt;&gt;</code>: the deterministic encodings of the items, concatenated.
+- <strong>Containers</strong>: <code>[ … ]</code> and <code>{ key: value, … }</code>. A trailing comma is an error.
+- <strong>Tags</strong>: <code>N(item)</code>.
+- <strong>Simple values</strong>: <code>simple(n)</code>, <code>true</code>, <code>false</code>, <code>null</code>, <code>undefined</code>.
+- <strong>Application literals</strong> (draft-ietf-cbor-edn-literals-29):</p>
+<table>
+<thead>
+<tr>
+<th>Literal</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>dt'…'</code></td>
+<td>RFC 3339 → epoch number: an integer, or a float when there is a fractional part</td>
+</tr>
+<tr>
+<td><code>DT'…'</code></td>
+<td>the same number wrapped in tag 1</td>
+</tr>
+<tr>
+<td><code>ip'…'</code></td>
+<td>address → byte string; prefix (<code>/n</code>) → <code>[n, trimmed bytes]</code></td>
+</tr>
+<tr>
+<td><code>IP'…'</code></td>
+<td>the same wrapped in tag 52 (IPv4) or tag 54 (IPv6)</td>
+</tr>
+</tbody>
+</table>
+<p>Rejected with a syntax error naming the feature: <code>b32''</code>/<code>h32''</code>, string concatenation, ellipsis <code>...</code>, raw strings, hex floats, other application literals.</p>
+<h3 id="output-cbor_out-on-anything-other-than-a-text-string">Output (<code>cbor_out</code>, <code>-&gt;&gt;</code> on anything other than a text string)<a class="headerlink" href="#output-cbor_out-on-anything-other-than-a-text-string" title="Permanent link">&para;</a></h3>
+<p>Core EDN only, written deterministically:
+- <strong>Separators</strong>: <code>", "</code> between items and <code>": "</code> after keys, as <code>jsonb_out</code> does.
+- <strong>Integers</strong>: decimal.
+- <strong>Bignums over 64 bits</strong>: <code>2(h'…')</code> / <code>3(h'…')</code>.
+- <strong>Floats</strong>: the shortest decimal that reads back as the same value. It always contains <code>.</code> or <code>e</code> (<code>1.0</code>, <code>1.5e300</code>). Special values print as <code>NaN</code>, <code>Infinity</code>, <code>-Infinity</code>, <code>-0.0</code>.
+- <strong>Text</strong>: JSON escaping; other characters are written as they are (databases are UTF-8, ADR-0010).
+- <strong>Bytes</strong>: <code>h'…'</code> in lowercase hex.
+- <strong>Tags</strong>: <code>N(item)</code>.
+- <strong>Simple values</strong>: <code>simple(n)</code>, <code>true</code>, <code>false</code>, <code>null</code>, <code>undefined</code>.</p>
+<p><code>cbor_diag(c, pretty =&gt; true)</code> and <code>cbor_pretty(c)</code> indent with 4 spaces, one entry per line, like <code>jsonb_pretty</code>.</p>
+<p>Only UTF-8 databases are supported: <code>CREATE EXTENSION</code> refuses others (ADR-0010).</p>
+<h2 id="6-packed-input">6. Packed input<a class="headerlink" href="#6-packed-input" title="Permanent link">&para;</a></h2>
+<p>Unpacking happens during normalization, on every input path (<code>cbor_in</code>, <code>cbor_recv</code>, <code>bytea::cbor</code>, <code>cbor_from_bytea</code>). There is no opt-out: stored data never contains packing (ADR-0005).</p>
+<p><strong>Idempotence (required):</strong> normalizing a stored body again gives exactly the same body. If unpacking could be turned off, a stored packing tag would be unpacked on restore (<code>pg_dump</code> goes through <code>cbor_out</code>/<code>cbor_in</code> or <code>send</code>/<code>recv</code>), and the value would change. This is why there is no opt-out.</p>
+<p>Packing schemes recognized:
+- <strong>IETF Packed CBOR</strong> (draft-ietf-cbor-packed-19):
+  - Table setup tags 113 and 1113.
+  - Inside their scope: shared item references (simple values 0–15, tag 6 with an integer), argument references (tags 128–143, tag 6 with an array), and function tags 105 (ijoin), 106 (join) and 114 (record).
+  - Outside any table setup tag: simple values 0–15 are plain simple values, and tags 6, 105, 106, 114 and 128–143 are plain tags. Tables supplied by the application environment (for example a media type) are not supported.
+- <strong>cbor-x records</strong> (cbor-records spec; the tags the current cbor-x encoder emits):
+  - 57342: record definitions
+  - 57343: inline record
+  - 57344–65535 (<code>0xe000 + id</code>): record references, unpacked to maps with text keys. cbor-x reads every tag from <code>0xe000</code> as a reference (8192 ids), wider than the cbor-records spec's 57344–57599.</p>
+<p>A reference to a structure not defined earlier in the same value is an error. This covers cbor-x shared and sequential structures, which are kept outside the data. cbor-x's legacy inline-record tag 105 is not supported: it clashes with IETF ijoin.
+- <strong>cbor-x's own packing</strong> (<code>pack</code> option): an older packed-CBOR draft, using tag 51 for the table, with tag 6 and simple-value references inside its scope.
+- <strong>cbor-x bundled strings</strong> (<code>bundleStrings</code>): not supported. cbor-x writes the strings after the value, so the input is not a single item and is refused.</p>
+<p>Limits: expansion is bounded by <code>postcbor.max_expansion_ratio</code> and <code>postcbor.max_expanded_size</code>, nesting by <code>postcbor.max_depth</code>. A reference cycle is an error.</p>
+<p>Implementation (<code>core/src/pack.rs</code>):
+- Normalization stops with an internal signal when it meets a table-setup or record tag (113, 1113, 51, 57342–65535); only then is the input decoded into an arena and resolved. Unpacked input pays nothing.
+- Resolution uses an explicit task stack and per-tag scopes: new table entries use the new number space, inherited ones keep theirs (draft §3).
+- Argument references combine argument and rump per draft §2.3–2.4: arrays concatenate, maps merge (right wins, <code>undefined</code> removes), strings concatenate taking the rump's string type, string with array joins. Function tags 105 (ijoin), 106 (join) and 114 (record) apply when the left-hand side is such a tag.
+- cbor-x tag 51 is <code>[values, prefixes, suffixes, rump]</code>; only the value table is used (cbor-x's encoder writes empty prefix and suffix tables).
+- Reference chains longer than 64 are rejected (loops); every arena node is charged against a memory budget of four times the output limit.
+- Output packing is deterministic: <code>ietf</code> puts strings of 3+ bytes used at least twice into a tag 113 table (largest saving first, ties by bytes), except when the value holds plain simple values 0–15 or tags 6/128–143, which would read as references inside tag 113 (found by fuzzing): such values are returned unpacked; <code>cbor-x</code> turns maps whose text-key set repeats into an inline record definition (57343) at first use and record references (57344+) afterwards, up to 8191 structures (ids up to <code>0xfffe</code>; cbor-x confuses id 8191 with its inline-definition tag).
+- A value packed more than <code>postcbor.max_expansion_ratio</code> times smaller than its unpacked form is rejected on input; raise the setting for such data.</p>
+<p>Output: <code>cbor_pack(c cbor, format text DEFAULT 'cbor-x') → bytea</code>.
+- <code>'cbor-x'</code> emits records (57342/57344+).
+- <code>'ietf'</code> emits tag 113.
+- The packer must be deterministic: the same value always gives the same bytes.</p>
+<h2 id="7-comparison-equality-hashing">7. Comparison, equality, hashing<a class="headerlink" href="#7-comparison-equality-hashing" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Equality</strong> is byte equality of bodies. The header and index section are never compared.</li>
+<li><strong>Hashing</strong> works on the body bytes: <code>hash_bytes</code> / <code>hash_bytes_extended</code> with a seed.</li>
+<li><strong>Ordering</strong> (btree support function 1) must satisfy <code>cmp(a, b) = 0 ⟺ body(a) = body(b)</code>. First by type rank:</li>
+<li>numbers: unsigned and negative integers, floats, bignums (tags 2/3)</li>
+<li>byte strings</li>
+<li>text strings</li>
+<li>arrays</li>
+<li>maps</li>
+<li>other tags</li>
+<li>unassigned simple values</li>
+<li>false</li>
+<li>true</li>
+<li>null</li>
+<li>undefined</li>
+<li><strong>Within a rank:</strong></li>
+<li><strong>Numbers</strong>: compared by exact mathematical value. Integers and floats are compared exactly, without going through f64. NaN sorts after every other number. When values are equal: integer &lt; float, and -0.0 &lt; 0.0.</li>
+<li><strong>Byte and text strings</strong>: bytewise lexicographic; a prefix sorts first. Text is compared as UTF-8 bytes, with no collation (ADR-0007).</li>
+<li><strong>Arrays</strong>: element by element; a prefix sorts first.</li>
+<li><strong>Maps</strong>: fewer entries sort first. Then key 1, value 1, key 2, … in stored order.</li>
+<li><strong>Tags</strong>: by tag number, then by content.</li>
+<li><strong>Simple values</strong>: by number.</li>
+</ul>
+<p>The property tests in section 10 check antisymmetry, transitivity, and agreement with byte equality and hashing.</p>
+<h2 id="8-sql-surface">8. SQL surface<a class="headerlink" href="#8-sql-surface" title="Permanent link">&para;</a></h2>
+<h3 id="type-and-io">Type and I/O<a class="headerlink" href="#type-and-io" title="Permanent link">&para;</a></h3>
+<p><code>cbor</code> (varlena, storage <code>extended</code>), with:
+- <code>cbor_in</code> / <code>cbor_out</code>: EDN.
+- <code>cbor_recv</code> / <code>cbor_send</code>: the deterministic CBOR body. <code>recv</code> goes through full validation and normalization.</p>
+<h3 id="operators">Operators<a class="headerlink" href="#operators" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Operator</th>
+<th>Right operand</th>
+<th>Result</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>-&gt;</code></td>
+<td><code>int</code></td>
+<td><code>cbor</code></td>
+<td>Array index (negative counts from the end), or integer key on a map</td>
+</tr>
+<tr>
+<td><code>-&gt;</code></td>
+<td><code>text</code>, <code>bytea</code></td>
+<td><code>cbor</code></td>
+<td>Text key, byte-string key</td>
+</tr>
+<tr>
+<td><code>-&gt;&gt;</code></td>
+<td>same as <code>-&gt;</code></td>
+<td><code>text</code></td>
+<td>Text string → its text; <code>null</code> → SQL NULL; anything else → EDN</td>
+</tr>
+<tr>
+<td><code>#&gt;</code> / <code>#&gt;&gt;</code></td>
+<td><code>text[]</code></td>
+<td><code>cbor</code> / <code>text</code></td>
+<td>Text path, jsonb rules</td>
+</tr>
+<tr>
+<td><code>@&gt;</code>, <code>&lt;@</code></td>
+<td><code>cbor</code></td>
+<td><code>bool</code></td>
+<td>Containment, jsonb semantics. Tags: same number and the content contains, except decimal fractions (tag 4) and bigfloats (tag 5), which are numbers and must be equal</td>
+</tr>
+<tr>
+<td><code>?</code></td>
+<td><code>text</code></td>
+<td><code>bool</code></td>
+<td>Map key exists, or a top-level array element is that text string</td>
+</tr>
+<tr>
+<td><code>?|</code>, <code>?&amp;</code></td>
+<td><code>text[]</code></td>
+<td><code>bool</code></td>
+<td>Any / all</td>
+</tr>
+<tr>
+<td><code>?#</code></td>
+<td><code>cbor</code></td>
+<td><code>bool</code></td>
+<td><code>?</code> with a key of any type (<code>cbor_has</code>)</td>
+</tr>
+<tr>
+<td><code>?#|</code>, <code>?#&amp;</code></td>
+<td><code>cbor</code> (an array of keys)</td>
+<td><code>bool</code></td>
+<td>Any / all, keys of any type (<code>cbor_has_any</code>, <code>cbor_has_all</code>)</td>
+</tr>
+<tr>
+<td><code>||</code></td>
+<td><code>cbor</code></td>
+<td><code>cbor</code></td>
+<td>jsonb concatenation semantics</td>
+</tr>
+<tr>
+<td><code>-</code></td>
+<td><code>text</code>, <code>text[]</code>, <code>int</code>, <code>bytea</code></td>
+<td><code>cbor</code></td>
+<td>Delete a key, or delete an element (<code>int</code>: by index)</td>
+</tr>
+<tr>
+<td><code>#-</code></td>
+<td><code>text[]</code></td>
+<td><code>cbor</code></td>
+<td>Delete at path</td>
+</tr>
+<tr>
+<td><code>= &lt;&gt; &lt; &lt;= &gt; &gt;=</code></td>
+<td><code>cbor</code></td>
+<td><code>bool</code></td>
+<td>Section 7</td>
+</tr>
+<tr>
+<td><code>@?</code>, <code>@@</code></td>
+<td><code>jsonpath</code></td>
+<td><code>bool</code></td>
+<td>Path exists / path predicate holds (see Path queries)</td>
+</tr>
+</tbody>
+</table>
+<p>Out-of-range indexes and missing keys return NULL, as in jsonb.</p>
+<p><strong>Why keys of any type and typed paths are not operators.</strong> Tested on PG 18: once an operator <code>(cbor, cbor)</code> exists, an untyped literal on the right is read as <code>cbor</code>. <code>doc -&gt; 'a'</code> then fails as invalid EDN, and <code>doc -&gt; '1'</code> silently looks up integer key 1. PostgreSQL first tries the left operand's type for an unknown literal. A separate key type does not help for paths either: <code>#&gt; '{a}'</code> with both <code>text[]</code> and another type on the right is rejected as "operator is not unique". Only types that an untyped literal never resolves to are overloaded on operators (<code>int</code>, <code>bytea</code>, <code>text</code>, <code>text[]</code>). Keys of any type and typed paths go through functions with their own names (below). The existence checks also get operators with their own symbols, <code>?#</code>, <code>?#|</code> and <code>?#&amp;</code>, so that GIN indexes can serve them: a symbol with a single <code>(cbor, cbor)</code> definition captures no other operator's literals. </p>
+<p>Typed-key functions:</p>
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Equivalent</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>cbor_get(doc, key cbor)</code>, <code>cbor_get_text(doc, key cbor)</code></td>
+<td><code>-&gt;</code> / <code>-&gt;&gt;</code> with a key of any type, or an array index</td>
+</tr>
+<tr>
+<td><code>cbor_get_path(doc, path cbor)</code>, <code>cbor_get_path_text(doc, path cbor)</code></td>
+<td><code>#&gt;</code> / <code>#&gt;&gt;</code> with a typed path</td>
+</tr>
+<tr>
+<td><code>cbor_has(doc, key cbor)</code>, <code>cbor_has_any(doc, keys cbor)</code>, <code>cbor_has_all(doc, keys cbor)</code></td>
+<td><code>?</code>, <code>?|</code>, <code>?&amp;</code> with keys of any type (<code>keys</code> is a CBOR array)</td>
+</tr>
+<tr>
+<td><code>cbor_delete(doc, key cbor)</code>, <code>cbor_delete_path(doc, path cbor)</code></td>
+<td><code>-</code>, <code>#-</code></td>
+</tr>
+<tr>
+<td><code>cbor_set_path</code>, <code>cbor_set_lax_path</code>, <code>cbor_insert_path</code></td>
+<td><code>cbor_set</code>, <code>cbor_set_lax</code>, <code>cbor_insert</code> with a typed path</td>
+</tr>
+</tbody>
+</table>
+<p>These use different names rather than overloads because function overloads <code>(cbor, text[])</code> and <code>(cbor, cbor)</code> are equally ambiguous for an untyped literal.</p>
+<p>Selectivity estimators: <code>matchingsel</code>/<code>matchingjoinsel</code> for <code>@&gt; &lt;@ ? ?| ?&amp; ?# ?#| ?#&amp;</code>; <code>eqsel</code>/<code>scalarltsel</code> etc. for comparisons.</p>
+<p>Operator classes: btree <code>cbor_ops</code> (default) and hash <code>cbor_ops</code> (default, with an extended hash function), and the GIN classes below.</p>
+<h3 id="gin-indexes">GIN indexes<a class="headerlink" href="#gin-indexes" title="Permanent link">&para;</a></h3>
+<p>Two operator classes, as for jsonb. Both are lossy: every match is rechecked against the row.</p>
+<table>
+<thead>
+<tr>
+<th>Class</th>
+<th>Operators</th>
+<th>Entries</th>
+<th>Storage</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>cbor_ops</code> (default)</td>
+<td><code>@&gt;</code> <code>?</code> <code>?|</code> <code>?&amp;</code> <code>?#</code> <code>?#|</code> <code>?#&amp;</code> <code>@?</code> <code>@@</code></td>
+<td>One per map key and one per atomic item, without their position, plus the path-equality form of items that differ from it</td>
+<td><code>bytea</code></td>
+</tr>
+<tr>
+<td><code>cbor_path_ops</code></td>
+<td><code>@&gt;</code></td>
+<td>One per atomic item: a hash of the path leading to it and of the item</td>
+<td><code>int4</code></td>
+</tr>
+</tbody>
+</table>
+<p>Both come from one walk over the value (core <code>gin</code>), in body order:
+- <strong>Atomic item</strong>: one that containment compares whole: a scalar, a tag whose content (through further tags) is atomic, or a decimal fraction or bigfloat (tags 4, 5). Arrays, maps and other tags around them are walked into.
+- <strong><code>cbor_ops</code> entry</strong>: a role byte, then the item's deterministic encoding. Role 1 (key) for map keys, of any type and whole, and for array elements and the top-level value; role 2 for map values. Sharing the key role lets <code>?</code> find array elements, as jsonb does. An item whose encoding is 125 bytes or longer gets instead the role with bit 7 set and a 4-byte hash of the encoding.
+- <strong><code>cbor_path_ops</code> entry</strong>: a 32-bit hash over the path steps and the item: each map key's encoding and each walked tag's number, with a marker byte per step kind. Arrays add no step, since array containment ignores positions; so <code>[1, 2] @&gt; 1</code> holds for the index too. The hash is FNV-1a with a final mix.
+- <strong>Path-equality entry</strong> (<code>cbor_ops</code> only): for an atomic item whose jsonpath equality form differs from its encoding, a second entry with the same role holding that form: transparent tags removed, numbers in one form (an integer when whole, else a decimal fraction without trailing zeros), so <code>1</code>, <code>1.0</code> and <code>4([-1, 10])</code> share one. Items a path literal cannot equal (byte strings, <code>undefined</code>, simple values, datetimes, NaN, numbers without a <code>numeric</code> value) have none. Plain integers and untagged strings add nothing.
+- Entries are on disk: changing the walk, the roles, the equality form or the hashes requires a REINDEX. <code>cbor_ops</code> indexes built before path-equality entries existed must be rebuilt.</p>
+<p>Queries:
+- <code>@&gt;</code>: the query value's own entries; the row must have all of them. A query with no entries (<code>{}</code>, <code>[]</code>, <code>{"a": {}}</code>) scans the whole index and rechecks every row.
+- <code>?</code>, <code>?|</code>, <code>?&amp;</code>: the key-role entry of each text key. <code>?&amp;</code> with no keys matches every row; <code>?|</code> with none matches no row.
+- <code>?#</code>, <code>?#|</code>, <code>?#&amp;</code>: the key-role entry of each key. A key that is not atomic cannot be found among array elements through entries, so <code>?#</code> with such a key, or <code>?#|</code> with any such key, rechecks every row; <code>?#&amp;</code> skips such keys.
+- <code>@?</code>, <code>@@</code> (<code>cbor_ops</code>): as jsonb, from each <code>accessors == literal</code> condition (accessors: <code>.key</code>, <code>.*</code>, <code>.**</code>, <code>[…]</code>, <code>[*]</code>, and filters on them): the key entries of its <code>.key</code> steps AND the literal's path-equality entry. The literal's role is the value role after a key step in strict mode, the key role after <code>[…]</code> or at the top, and either one in lax mode or after <code>.**</code>. <code>&amp;&amp;</code>, <code>||</code> and <code>!</code> combine conditions (NOT through De Morgan; <code>!</code> of an equality gives nothing); an AND keeps the side that has entries. A path with no such condition scans the whole index. <code>cbor_path_ops</code> has no path support: its hashes include tags, which paths look through.
+- Strategy numbers: 7 <code>@&gt;</code>, 9 <code>?</code>, 10 <code>?|</code>, 11 <code>?&amp;</code>, 15 <code>@?</code>, 16 <code>@@</code> (jsonb's), 12 <code>?#</code>, 13 <code>?#|</code>, 14 <code>?#&amp;</code>.</p>
+<h3 id="path-queries">Path queries<a class="headerlink" href="#path-queries" title="Permanent link">&para;</a></h3>
+<p><code>@?</code>, <code>@@</code> and <code>cbor_path_exists</code>, <code>cbor_path_match</code>, <code>cbor_path_query</code> (set-returning), <code>cbor_path_query_array</code>, <code>cbor_path_query_first</code>, each with <code>vars cbor</code> (a map) and <code>silent bool</code>, plus the <code>_tz</code> variants. The path argument is PostgreSQL's <code>jsonpath</code> (ADR-0008). Results must equal jsonb's for every value that converts to jsonb without loss: the reference is <code>jsonb_path_*(value::jsonb, …)</code>.</p>
+<ul>
+<li><strong>Compiled path</strong>: the <code>jsonpath</code> value's binary form is decoded in the core (format version 1, stable since PG 12; PG 17 appended the <code>.bigint()</code> … <code>.timestamp_tz()</code> items). Unknown versions and items are refused, and so are paths nesting deeper than 256 items (arguments and chained steps both count). The scalar functions and the operators keep the decoded path per call site; <code>cbor_path_query</code>, whose call site holds its set-returning state, decodes once per call.</li>
+<li><strong>Numbers</strong>: inside path expressions, numbers compare by value, as in SQL/JSON: <code>1 == 1.0</code>, and bignums, decimal fractions and bigfloats are numbers. A float takes the value of its shortest decimal form, as when it is converted to jsonb. A number without a <code>numeric</code> value (a decimal fraction beyond <code>numeric</code>'s range, a bigfloat with more than 16383 binary places) compares as unknown and is not a number for arithmetic. Containment and <code>=</code> stay typed.</li>
+<li><strong>CBOR types jsonpath lacks</strong>:</li>
+<li>Byte strings: <code>.type()</code> is <code>"bytes"</code>; two byte strings compare by their bytes, and comparing them with other types is unknown, as jsonpath does for mismatched types.</li>
+<li>Tags 2 and 3 are numbers, and tags 4 and 5 when their content is <code>[integer, integer or bignum]</code>; tags 0 and 1 are datetimes when their content is one (below); other tags are transparent (the path sees their content, and a result taken from the document keeps its tag).</li>
+<li>Map keys that are not text: <code>.key</code> matches only text keys; <code>.*</code> and <code>.keyvalue()</code> visit every entry, and <code>.keyvalue()</code> gives the key as its CBOR value.</li>
+<li><code>undefined</code> and simple values keep their own types (<code>.type()</code> is <code>"undefined"</code>, <code>"simple"</code>), unequal to <code>null</code>; simple values compare by number.</li>
+<li><strong>Arithmetic</strong> is decimal, as in SQL/JSON, and runs PostgreSQL's <code>numeric</code> functions, so results and scales match jsonb's. A result of scale 0 becomes an integer (a bignum if large); any other a decimal fraction (tag 4) keeping its scale: <code>2 * 3</code> is <code>6</code>, <code>2 * 2.5</code> is <code>5.0</code>, <code>4([-1, 50])</code>. Results returned unchanged from the document keep their CBOR form (a float stays a float).</li>
+<li><strong>NaN and ±Infinity</strong> floats are numbers, ordered as <code>numeric</code> orders them: NaN equals itself and sorts above everything.</li>
+<li><strong><code>.keyvalue()</code> ids</strong> are unique per object, as in jsonb, and equal to jsonb's for objects at the top of the document. jsonb derives the others from its own byte layout; ours come from positions in the CBOR value, so they differ.</li>
+<li><strong>Regex and datetimes</strong>: <code>like_regex</code> runs PostgreSQL's regex engine; the datetime methods use PostgreSQL's datetime parsing, casts and time zone rules (the <code>_tz</code> functions allow the casts that depend on the session time zone). A datetime result comes back as ISO 8601 text, as jsonb returns it. Tag 0 is a <code>timestamptz</code> when its text is RFC 3339 (shown with its own offset), tag 1 when its number of seconds is within <code>timestamptz</code>'s range; otherwise the tag is transparent.</li>
+<li><strong>GIN</strong>: <code>@?</code> and <code>@@</code> use <code>cbor_ops</code> for <code>accessors == literal</code> conditions (GIN indexes above); <code>cbor_path_ops</code> does not support them.</li>
+</ul>
+<h3 id="subscripting">Subscripting<a class="headerlink" href="#subscripting" title="Permanent link">&para;</a></h3>
+<p><code>cbor_subscript_handler</code>, modelled on <code>jsonbsubs.c</code>:
+- The subscript's type picks the meaning, just like <code>-&gt;</code>: <code>int</code>, <code>text</code>, <code>bytea</code> or <code>cbor</code>.
+- Fetch behaves like <code>-&gt;</code>.
+- Assignment creates missing levels like jsonb subscripting: a missing key step creates a map, a missing integer step creates an array padded with nulls; assigning past the end of an existing array pads it with nulls. A NULL column is treated as empty. Assigning below a scalar is an error, as is a NULL subscript.
+- Subscripts of type <code>int2</code>/<code>int4</code>/<code>int8</code> index arrays or address integer map keys; <code>bytea</code> addresses byte-string keys; <code>cbor</code> addresses keys of any type; anything else (and untyped literals) is text.</p>
+<h3 id="functions-with-a-jsonb-counterpart">Functions with a jsonb counterpart<a class="headerlink" href="#functions-with-a-jsonb-counterpart" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>jsonb</th>
+<th>cbor</th>
+<th>Differences</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>to_jsonb(anyelement)</code></td>
+<td><code>to_cbor(anyelement)</code></td>
+<td>See "to_cbor mapping" below</td>
+</tr>
+<tr>
+<td><code>jsonb_build_array(VARIADIC "any")</code></td>
+<td><code>cbor_build_array</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>jsonb_build_object(VARIADIC "any")</code></td>
+<td><code>cbor_build_object</code></td>
+<td>Keys keep their type (an <code>int</code> argument becomes an integer key)</td>
+</tr>
+<tr>
+<td><code>jsonb_object(text[])</code>, <code>jsonb_object(text[], text[])</code></td>
+<td><code>cbor_object</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>jsonb_agg</code>, <code>jsonb_agg_strict</code></td>
+<td><code>cbor_agg</code>, <code>cbor_agg_strict</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>jsonb_object_agg[_strict|_unique|_unique_strict]</code></td>
+<td><code>cbor_object_agg[…]</code></td>
+<td>Keys of any type</td>
+</tr>
+<tr>
+<td><code>jsonb_array_elements</code>, <code>_text</code></td>
+<td><code>cbor_array_elements</code>, <code>_text</code></td>
+<td><code>_text</code> uses the <code>-&gt;&gt;</code> rules</td>
+</tr>
+<tr>
+<td><code>jsonb_array_length</code></td>
+<td><code>cbor_array_length</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>jsonb_each</code>, <code>_text</code></td>
+<td><code>cbor_each</code>, <code>_text</code></td>
+<td><code>cbor_each</code> returns <code>(key cbor, value cbor)</code>; <code>_text</code> returns both as text</td>
+</tr>
+<tr>
+<td><code>jsonb_object_keys</code></td>
+<td><code>cbor_object_keys</code></td>
+<td>Returns <code>setof cbor</code>, keeping the key's type</td>
+</tr>
+<tr>
+<td><code>jsonb_extract_path</code>, <code>_text</code></td>
+<td><code>cbor_extract_path</code>, <code>_text</code></td>
+<td><code>VARIADIC text[]</code></td>
+</tr>
+<tr>
+<td><code>jsonb_populate_record</code>, <code>_recordset</code>, <code>_valid</code></td>
+<td><code>cbor_populate_record</code>, <code>_recordset</code>, <code>_valid</code></td>
+<td>Text keys match columns; other keys are ignored. Nested composites and arrays (nested arrays are dimensions) are converted; tags 0/1, 37 and 100 go to <code>timestamptz</code>, <code>uuid</code> and <code>date</code> columns. <code>_valid</code> (PostgreSQL 17+, as jsonb's) returns whether <code>cbor_populate_record</code> would succeed</td>
+</tr>
+<tr>
+<td><code>jsonb_to_record</code>, <code>_recordset</code></td>
+<td><code>cbor_to_record</code>, …</td>
+<td></td>
+</tr>
+<tr>
+<td><code>jsonb_strip_nulls(…, strip_in_arrays)</code></td>
+<td><code>cbor_strip_nulls(…, strip_in_arrays DEFAULT false, strip_undefined DEFAULT false)</code></td>
+<td><code>undefined</code> is only stripped when <code>strip_undefined</code> is true</td>
+</tr>
+<tr>
+<td><code>jsonb_set</code>, <code>jsonb_set_lax</code>, <code>jsonb_insert</code></td>
+<td><code>cbor_set</code>, <code>cbor_set_lax</code>, <code>cbor_insert</code></td>
+<td><code>text[]</code> path; typed-path versions are the <code>*_path</code> functions above</td>
+</tr>
+<tr>
+<td><code>jsonb_delete_path</code> (<code>#-</code>)</td>
+<td><code>cbor_delete_text_path</code> (<code>#-</code>)</td>
+<td>Renamed so it cannot be confused with the typed <code>cbor_delete_path(cbor, cbor)</code></td>
+</tr>
+<tr>
+<td><code>jsonb_pretty</code></td>
+<td><code>cbor_pretty</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>jsonb_typeof</code></td>
+<td><code>cbor_typeof</code></td>
+<td>Returns <code>integer</code>, <code>float</code>, <code>bytes</code>, <code>text</code>, <code>array</code>, <code>map</code>, <code>tag</code>, <code>simple</code>, <code>boolean</code>, <code>null</code>, <code>undefined</code></td>
+</tr>
+<tr>
+<td><code>jsonb_path_*</code></td>
+<td><code>cbor_path_*</code></td>
+<td>Path queries, below</td>
+</tr>
+</tbody>
+</table>
+<p>The set-returning functions run in value-per-call mode, using core iterators that borrow the detoasted datum. If pgrx 0.20 requires <code>'static</code> iterators, the datum is copied once into the multi-call memory context.</p>
+<p><code>populate_record</code> value conversion, following jsonb's <code>populate_record</code>:
+- a text string goes through the column type's input function (also for array and composite columns)
+- an integer or float goes to numeric columns directly
+- bytes go to <code>bytea</code>
+- a map goes to a composite column; anything else but text is an error ("cannot call populate_composite on …"), and so is a top-level value that is not a map
+- an array goes to an array column: nested arrays are dimensions, taken from the first element at each level, and every sub-array must match them (at most 6); anything else but text is an error
+- anything else goes through its EDN text into the column's input function
+- a domain column converts to its base type, then checks the domain's constraints. Without a base row, an absent column is NULL and is checked too (<code>NOT NULL</code> domains fail); with one, absent columns keep the base row's values, and an empty map returns the base row
+- <code>_valid</code> makes every conversion and domain error a <code>false</code> result (soft errors; PostgreSQL 16 has no soft domain check, hence 17+). NULL for both arguments gives NULL, as jsonb's does</p>
+<h3 id="cbor-specific-functions">CBOR-specific functions<a class="headerlink" href="#cbor-specific-functions" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>cbor_tag(cbor) → int8</code></td>
+<td>The tag number, or NULL if the value isn't tagged. Error if above <code>int8</code> max</td>
+</tr>
+<tr>
+<td><code>cbor_untag(cbor) → cbor</code></td>
+<td>The tag content, or the value itself if it isn't tagged</td>
+</tr>
+<tr>
+<td><code>cbor_tagged(tag int8, value cbor) → cbor</code></td>
+<td>Wraps a value in a tag, then normalizes (so <code>cbor_tagged(2, h'01')</code> gives <code>1</code>)</td>
+</tr>
+<tr>
+<td><code>cbor_from_bytea(bytea) → cbor</code></td>
+<td>Same as <code>bytea::cbor</code>, as a function</td>
+</tr>
+<tr>
+<td><code>cbor_pack(cbor, format text DEFAULT 'cbor-x') → bytea</code></td>
+<td>Section 6</td>
+</tr>
+<tr>
+<td><code>cbor_diag(cbor, pretty bool DEFAULT false) → text</code></td>
+<td>EDN</td>
+</tr>
+<tr>
+<td><code>cbor_simple(int) → cbor</code>, <code>cbor_undefined() → cbor</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>cbor_byte_length(cbor) → int8</code></td>
+<td>Length of the body</td>
+</tr>
+<tr>
+<td><code>cbor_to_jsonb_strict(cbor) → jsonb</code></td>
+<td>Error on anything JSON can't represent</td>
+</tr>
+</tbody>
+</table>
+<h3 id="casts-all-explicit">Casts (all explicit)<a class="headerlink" href="#casts-all-explicit" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>From → to</th>
+<th>Rule</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>cbor → bool</code></td>
+<td><code>true</code>/<code>false</code> only</td>
+</tr>
+<tr>
+<td><code>cbor → int2/int4/int8</code></td>
+<td>Integers in range</td>
+</tr>
+<tr>
+<td><code>cbor → float4/float8</code></td>
+<td>Integers or floats</td>
+</tr>
+<tr>
+<td><code>cbor → numeric</code></td>
+<td>Integers, floats (NaN and ±Infinity included), tags 2/3/4/5 within <code>numeric</code>'s range and scale</td>
+</tr>
+<tr>
+<td><code>cbor → timestamptz</code></td>
+<td>Tag 0 (RFC 3339 text) or tag 1 (epoch number)</td>
+</tr>
+<tr>
+<td><code>cbor → uuid</code></td>
+<td>Tag 37 with 16 bytes</td>
+</tr>
+<tr>
+<td><code>cbor → date</code></td>
+<td>Tag 100</td>
+</tr>
+<tr>
+<td><code>cbor → bytea</code></td>
+<td>The deterministic body</td>
+</tr>
+<tr>
+<td><code>cbor → jsonb/json</code></td>
+<td>Lossy, RFC 8949 §6.1 (ADR-0009); bignums, decimal fractions and bigfloats become JSON numbers when <code>numeric</code> can hold them</td>
+</tr>
+<tr>
+<td><code>bytea → cbor</code></td>
+<td>Decode and normalize</td>
+</tr>
+<tr>
+<td><code>jsonb/json → cbor</code></td>
+<td>Text keys. Integers become integers (bignum if needed). Non-integer numbers become the nearest f64</td>
+</tr>
+</tbody>
+</table>
+<h3 id="to_cbor-mapping">to_cbor mapping<a class="headerlink" href="#to_cbor-mapping" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>PostgreSQL type</th>
+<th>CBOR result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>bool</code></td>
+<td>true/false</td>
+</tr>
+<tr>
+<td><code>int2/4/8</code></td>
+<td>integer</td>
+</tr>
+<tr>
+<td><code>float4/8</code></td>
+<td>float</td>
+</tr>
+<tr>
+<td><code>numeric</code></td>
+<td>integer if integral, bignum if beyond 64 bits; otherwise a tag 4 decimal fraction. NaN and ±Infinity become floats</td>
+</tr>
+<tr>
+<td><code>text</code>, <code>varchar</code>, <code>char</code></td>
+<td>text string</td>
+</tr>
+<tr>
+<td><code>bytea</code></td>
+<td>byte string</td>
+</tr>
+<tr>
+<td><code>timestamptz</code></td>
+<td><code>1(float epoch seconds)</code>, always a float, stored in its shortest exact width</td>
+</tr>
+<tr>
+<td><code>uuid</code></td>
+<td><code>37(h'…')</code></td>
+</tr>
+<tr>
+<td><code>date</code></td>
+<td><code>100(days since epoch)</code></td>
+</tr>
+<tr>
+<td><code>timestamp</code> (without time zone)</td>
+<td><code>1(float epoch seconds)</code>, treating the value as UTC</td>
+</tr>
+<tr>
+<td>arrays</td>
+<td>arrays, nested for multi-dimensional arrays</td>
+</tr>
+<tr>
+<td>composites and records</td>
+<td>map with text keys (column names)</td>
+</tr>
+<tr>
+<td><code>json</code>, <code>jsonb</code></td>
+<td>the conversion used by the cast</td>
+</tr>
+<tr>
+<td><code>cbor</code></td>
+<td>itself</td>
+</tr>
+<tr>
+<td>domains</td>
+<td>their base type</td>
+</tr>
+<tr>
+<td>anything else</td>
+<td>its text output, as a text string</td>
+</tr>
+</tbody>
+</table>
+<h2 id="9-code-architecture">9. Code architecture<a class="headerlink" href="#9-code-architecture" title="Permanent link">&para;</a></h2>
+<p>Cargo workspace, crates fetched from crates.io:</p>
+<ul>
+<li><strong><code>core/</code> (<code>postcbor-core</code>)</strong>: pure Rust, no dependencies, <code>#![forbid(unsafe_code)]</code>. Every byte-level operation lives here.</li>
+<li><code>cursor</code>: the only code that indexes into input or body bytes. Every read is bounds-checked and returns <code>Result</code>.</li>
+<li><code>normalize</code>: input bytes → deterministic body, including unpacking (<code>pack</code>).</li>
+<li><code>pack</code>: unpacking packed input, and <code>cbor_pack</code>.</li>
+<li><code>encode</code>: shortest-form heads. <code>float</code>: float widths. <code>bigint</code>, <code>num</code>: bignums and decimal text for <code>numeric</code>.</li>
+<li><code>datum</code>: the stored form (header, body, index section); <code>index</code>: building and reading the index section, and rebasing it when extracting.</li>
+<li><code>value</code>: borrowed views (<code>Value&lt;'a&gt;</code>, which borrows its parsed <code>Datum</code>) and lazy iterators (<code>ArrayIter&lt;'a&gt;</code>, <code>MapIter&lt;'a&gt;</code>).</li>
+<li><code>edn</code>: parser and printer.</li>
+<li><code>cmp</code>: ordering, and the input to hashing.</li>
+<li><code>ops</code>: lookups, paths, containment and <code>?</code> checks. <code>edit</code>: operations that build a new value (concatenation, deletion, set/insert, strip_nulls).</li>
+<li><code>json</code>: the decision logic for converting to and from JSON. Building and reading the actual jsonb values happens in the glue.</li>
+<li><code>gin</code>: the walk over a value's keys and atomic items, and the GIN entries built from it. <code>jsonpath::gin</code>: the entries and AND/OR program of a path query, and the path-equality form.</li>
+<li><code>jsonpath</code>: decoding PostgreSQL's compiled <code>jsonpath</code> (and a printer for tests), and the evaluator (<code>jsonpath::eval</code>), which calls a host trait for <code>numeric</code> arithmetic, input functions and regexes. <code>decimal</code>: exact decimals and jsonpath numbers, in and out of PostgreSQL's <code>numeric</code> binary form.</li>
+<li><code>ctx</code>, <code>out</code>, <code>error</code>: limits and interrupt checks, the output buffer trait, errors.</li>
+<li><strong><code>postcbor/</code></strong>: the pgrx <code>cdylib</code>. It holds the SQL definitions, the conversions to and from PostgreSQL types, the settings, and turning core errors into <code>ereport</code> calls. <code>unsafe</code> is allowed only where raw PostgreSQL APIs are unavoidable: <code>datum</code> (varlena wrapper, <code>PallocBuf</code>), <code>io</code> (receive buffer, encoding conversion), <code>convert</code> (<code>to_cbor</code> over any type: arrays, composites, catalog lookups), <code>build</code> (<code>VARIADIC "any"</code> and aggregate states), <code>record</code> (row construction), <code>subscript</code>, <code>gin</code> (GIN support functions), and <code>path</code> (the evaluator's host: <code>numeric</code> functions, input functions, regexes). Each <code>unsafe</code> block carries a one-line comment stating its invariant.</li>
+<li><strong>jsonb conversion</strong> goes through JSON text: <code>cbor → jsonb</code> prints JSON with the core's <code>json</code> module and calls <code>jsonb_in</code>; <code>jsonb/json → cbor</code> reads <code>jsonb_out</code>/<code>json_out</code> text with the EDN parser (JSON is a subset of EDN). Replace with direct <code>JsonbValue</code> building only if benchmarks show it matters.</li>
+<li><strong><code>fuzz/</code></strong>: cargo-fuzz targets. Depends only on <code>postcbor-core</code>. Not part of the default workspace build.</li>
+</ul>
+<p>Core rules:
+- <strong>No <code>powi</code>/<code>powf</code></strong> or other float functions without exact results: only basic IEEE operations and bit-level construction (<code>float::pow2</code>). Miri caught <code>powi</code> giving different results.
+- <strong>No recursion.</strong> Every walk keeps an explicit stack, limited by <code>max_depth</code>. One exception: the jsonpath evaluator recurses over the path expression, whose nesting is capped at 256 items when it is decoded (each recursion also checks PostgreSQL's stack limit). <code>.**</code>, the only step that descends by document depth, uses an explicit stack.
+- <strong>Checked arithmetic</strong> for every offset and length, and <code>overflow-checks = true</code> in the release profile.
+- <strong>Fallible allocation</strong> (<code>try_reserve</code>) for any buffer whose size comes from the input. The Rust allocator is <code>malloc</code>, and an allocation failure that isn't handled would abort the backend.
+- <strong>A declared length is never trusted for allocation.</strong> It is first checked against the bytes remaining.
+- <strong>Errors</strong> are <code>Result&lt;_, Error { kind, offset }&gt;</code>. A panic means a bug.
+- <strong>Limits and cancellation</strong>: operations that loop over input take a context (<code>trait Ctx</code>) carrying the limits and a <code>check_interrupts()</code> hook, called every 4096 items. The glue implements the hook with pgrx's <code>check_for_interrupts!()</code>.
+- <strong>Output goes straight into PostgreSQL memory.</strong> Every core function that produces bytes (datums, EDN, <code>-&gt;&gt;</code> text, <code>bytea</code>) writes through a buffer trait (<code>OutBuf</code>: reserve, append, patch a byte at a position, length). The core implements it for <code>Vec&lt;u8&gt;</code> for tests, Miri and fuzzing.
+  - The glue's implementation (<code>PallocBuf</code>) allocates in the current memory context, with the 4-byte varlena header reserved at the front. It grows by doubling with <code>repalloc</code>, sets <code>VARSIZE</code> when finished, and returns the buffer as the datum, with no copy.
+  - Start capacity: the input size when there is one (normalization, modifying functions), otherwise a small constant.
+  - Aggregates write into a buffer allocated in the aggregate memory context.
+  - Running out of memory in <code>palloc</code>/<code>repalloc</code> raises a PostgreSQL error. pgrx turns it into a panic, so Rust cleans up correctly, and the memory context frees the buffer.</p>
+<h2 id="10-testing">10. Testing<a class="headerlink" href="#10-testing" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Core unit tests</strong> (<code>cargo test -p postcbor-core</code>): every normalization rule, every EDN form, format edge cases (index threshold boundaries, extraction rebasing).</li>
+<li><strong>Miri</strong> on <code>postcbor-core</code> tests.</li>
+<li><strong>Property tests</strong>, written as fuzz targets with <code>arbitrary</code> that generate valid values:</li>
+<li>decode → encode → decode is the same value</li>
+<li>EDN out → in is the same value</li>
+<li><code>cmp</code> is antisymmetric and transitive, and <code>cmp = 0 ⟺</code> the bodies are equal, which implies equal hashes</li>
+<li>an index lookup agrees with a linear scan</li>
+<li><code>cbor_set</code> followed by <code>-&gt;</code> returns the value that was set</li>
+<li>extracting a sub-value and re-normalizing it gives the same datum</li>
+<li>normalizing any stored body again gives the same body (idempotence, section 6)</li>
+<li><strong>Byte-input fuzz targets</strong>: normalize (including packed input) and the EDN parser. The corpus is committed under <code>fuzz/corpus/</code>. Seeds: RFC 8949 Appendix A, regression cases, <code>cbor2</code> output.</li>
+<li><strong>Cross-check against Python <code>cbor2</code></strong> (a test-only tool, <code>uv run --with cbor2 tests/crosscheck.py [count]</code>): random values encoded by <code>cbor2</code> (plain and canonical) must be accepted, and their normalized form must decode to the same value, compared type-strictly (1 ≠ 1.0, -0.0 ≠ 0.0). It drives the core through <code>core/examples/normalize_lines.rs</code>.</li>
+<li><strong>SQL tests</strong>: <code>pg_regress</code> suites under <code>postcbor/tests/pg_regress/</code>, run by <code>cargo pgrx regress</code> against pgrx-managed PostgreSQL 15, 16, 17 and 18 (<code>make test-matrix</code>). <code>make test</code> runs them against the major of <code>PG_CONFIG</code>. Some suites have a second expected output (<code>*_1.out</code>) for PostgreSQL 15 and 16.</li>
+<li><strong>CI</strong> (GitHub Actions) runs clippy and the SQL suites on each version, Miri, and every fuzz target for 30 s, on each push and pull request.</li>
+</ul>
+<h2 id="11-dependencies">11. Dependencies<a class="headerlink" href="#11-dependencies" title="Permanent link">&para;</a></h2>
+<p>Approved: <code>pgrx</code> (and its dependency tree); for fuzzing only, <code>libfuzzer-sys</code> and <code>arbitrary</code>; for cross-checks only, Python <code>cbor2</code>; for the documentation site only, Python <code>zensical</code> and Zensical's fork of <code>mike</code> for versions (installed from git, not PyPI; both pinned in the <code>Makefile</code>, run through <code>uvx</code>). Any other dependency needs the user's approval first.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-circle-arrow-up" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m16 12-4-4-4 4M12 16V8"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../performance/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Performance">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-arrow-left" viewBox="0 0 24 24"><path d="m12 19-7-7 7-7M19 12H5"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Performance
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../contributing/" class="md-footer__link md-footer__link--next" aria-label="Next: Contributing">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Contributing
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-arrow-right" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://zensical.org/" target="_blank" rel="noopener">
+      Zensical
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog" role="status" aria-atomic="true">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      
+      
+        
+        
+      <script id="__config" type="application/json">{"annotate":null,"base":"..","features":["content.code.copy","navigation.footer","navigation.path","navigation.sections","navigation.top","navigation.tracking","search.highlight"],"redirect":null,"search":"../assets/javascripts/workers/search.719e0d91.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","clipboard.error":"Could not copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"provider":"mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.3cb411a8.min.js"></script>
+      
+    
+  </body>
+</html>
